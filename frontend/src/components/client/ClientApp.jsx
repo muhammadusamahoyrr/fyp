@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext.jsx';
 import Dashboard from './Dashboard.jsx';
 import { DARK, LIGHT } from '@/components/admin/themes.js';
+import { clientThemeOnTokens } from './clientTheme.js';
 import { ToastContainer } from '@/components/shared/Toast.jsx';
 
 export default function ClientApp({ initialTab = 'overview' }) {
@@ -28,7 +29,7 @@ export default function ClientApp({ initialTab = 'overview' }) {
   // fell back to a no-op and every client toast — successes and refusals alike —
   // was silently dropped; the only container lived in the unused legacy App.jsx.
   return (
-    <ToastContainer theme={isDark ? DARK : LIGHT}>
+    <ToastContainer theme={clientThemeOnTokens(isDark ? DARK : LIGHT)}>
       <Dashboard
         initialTab={initialTab}
         isDark={isDark}

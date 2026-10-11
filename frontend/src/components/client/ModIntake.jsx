@@ -11,6 +11,7 @@ import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { readIntakeValue, writeIntakeValue, clearIntakeValue } from "@/lib/intakeStorage.js";
 import { escapeHtml } from "@/lib/escapeHtml.js";
+import { DOCS_FONT } from "./documents/ui.jsx";
 import { extractionLabel, incompleteFiles, TONE_OK, TONE_WARN, TONE_BAD, TONE_NEUTRAL } from "@/lib/extractionStatus.js";
 
 /* One colour per tone, so a new state cannot arrive looking like a reassurance
@@ -120,6 +121,309 @@ const GROUNDING_NOTE = {
     unverified: "These steps have not been verified against Pakistani law. Please confirm them with a qualified lawyer.",
 };
 
+/* The intake's look (2026-10-10), scoped by [data-intake]; client tokens
+ * (clientTheme.js), so the lawyer side is untouched. */
+const INTAKE_CSS = `[data-intake] .in-head{display:flex;align-items:flex-end;gap:16px;margin:4px 0 22px}
+[data-intake] .in-title{margin:0;font-size:34px;font-weight:600;color:var(--ink);letter-spacing:-.2px;line-height:1.15}
+[data-intake] .in-sub{margin-top:6px;font-size:14px;color:var(--muted)}
+[data-intake] .in-meta .dot{width:7px;height:7px;border-radius:50%;background:var(--brand-text)}
+[data-intake] .in-meta{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--muted);background:var(--surface);border:1px solid var(--line)}
+[data-intake] .in-meta b{color:var(--brand-text)}
+[data-intake] .in-shell{display:block}
+[data-intake] .in-main{min-width:0}
+[data-intake] .in-rail{position:relative;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));max-width:860px;margin:0 auto 26px;padding:0}
+[data-intake] .in-rstep{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0;padding:0 6px;border:0;background:transparent;color:var(--ink);font:inherit;text-align:center;cursor:pointer}
+[data-intake] .in-rstep:disabled{cursor:not-allowed}
+[data-intake] .in-rstep[aria-current]{cursor:default}
+[data-intake] .in-rstep::before{content:"";position:absolute;top:16px;right:calc(50% + 22px);left:calc(-50% + 22px);height:2px;border-radius:2px;background:var(--line-strong)}
+[data-intake] .in-rstep:first-child::before{display:none}
+[data-intake] .in-rstep[data-done]::before,[data-intake] .in-rstep[aria-current]::before{background:linear-gradient(90deg,#1c9c66,#3ee0a1)}
+[data-intake] .in-rstep .num{position:relative;width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;color:var(--muted);background:var(--surface);border:2px solid var(--line-strong);transition:transform .25s cubic-bezier(.3,1.4,.5,1),background .25s,color .25s,border-color .25s,box-shadow .25s}
+[data-intake] .in-rstep:hover:not(:disabled):not([aria-current]) .num{transform:scale(1.1);border-color:var(--brand-text);color:var(--brand-text);box-shadow:0 0 0 5px color-mix(in srgb,var(--brand-text) 14%,transparent)}
+[data-intake] .in-rstep:hover:not(:disabled):not([aria-current]) .t{color:var(--ink)}
+[data-intake] .in-rstep:focus-visible{outline:none}
+[data-intake] .in-rstep:focus-visible .num{box-shadow:0 0 0 3px var(--focus)}
+[data-intake] .in-rstep .t{display:block;max-width:100%;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .2s}
+[data-intake] .in-rstep .d{display:block;max-width:100%;margin-top:1px;font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-intake] .in-rstep>span:last-child{max-width:100%;min-width:0}
+[data-intake] .in-rstep .now{display:none}
+[data-intake] .in-rstep[data-done] .num{background:color-mix(in srgb,var(--brand-text) 18%,var(--surface));border-color:transparent;color:var(--brand-text)}
+[data-intake] .in-rstep[data-done] .t{color:var(--ink)}
+[data-intake] .in-rstep[data-done] .d{color:var(--brand-text)}
+[data-intake] .in-rstep[aria-current] .num{background:linear-gradient(135deg,#12897f,#1c9c66);border-color:transparent;color:#fff;box-shadow:0 0 0 5px color-mix(in srgb,var(--brand-text) 20%,transparent);animation:inRing 2.4s ease-out infinite}
+[data-intake] .in-rstep[aria-current] .t{color:var(--brand-text);font-weight:700}
+[data-intake] .in-rstep[aria-current] .d{color:var(--muted)}
+@keyframes inRing{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--brand-text) 45%,transparent)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}
+[data-intake] .in-rprog{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+[data-intake] .in-filebtn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 8px 0 14px;border-radius:999px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s,transform .15s}
+[data-intake] .in-filebtn:hover{background:var(--hover)}
+[data-intake] .in-filebtn:active{transform:scale(.97)}
+[data-intake] .in-filebtn[aria-expanded="true"]{border-color:color-mix(in srgb,var(--brand-text) 60%,transparent);background:color-mix(in srgb,var(--brand-text) 12%,var(--surface))}
+[data-intake] .in-filebtn svg{color:var(--brand-text)}
+[data-intake] .in-filebtn .n{min-width:22px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:999px;display:grid;place-items:center;font-size:11.5px;font-weight:800;color:var(--on-brand);background:var(--brand-solid)}
+[data-intake] .in-file{position:fixed;top:16px;right:16px;bottom:16px;z-index:60;width:340px;max-width:calc(100vw - 32px);box-sizing:border-box;display:flex;flex-direction:column;padding:20px;border-radius:22px;background:var(--surface);border:1px solid var(--line-strong);box-shadow:-24px 0 60px -24px rgba(0,0,0,.8);overflow-y:auto;transform:translateX(calc(100% + 24px));visibility:hidden;transition:transform .35s cubic-bezier(.22,1,.36,1),visibility 0s linear .35s}
+[data-intake] .in-file[data-open]{transform:none;visibility:visible;transition:transform .35s cubic-bezier(.22,1,.36,1),visibility 0s}
+[data-intake] .in-file-x{margin-left:auto;width:34px;height:34px;flex:none;border-radius:10px;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:background .2s,color .2s}
+[data-intake] .in-file-x:hover{background:var(--danger-soft);color:var(--danger)}
+[data-intake] .in-file-x svg{transition:transform .25s}
+[data-intake] .in-file-x:hover svg{transform:rotate(90deg)}
+[data-intake] .in-file-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+[data-intake] .in-file-ic{width:34px;height:34px;flex:none;border-radius:10px;display:grid;place-items:center;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-intake] .in-file-row{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+[data-intake] .in-file-row span:first-child{color:var(--faint)}
+[data-intake] .in-file-row b{font-weight:600;color:var(--ink);text-align:right}
+[data-intake] .in-file-row b[data-new]{color:var(--brand-text)}
+[data-intake] .in-file-row i{font-style:normal;color:var(--faint)}
+[data-intake] .in-file-note{margin-top:auto;padding:12px;border-radius:14px;background:var(--surface-2);font-size:12px;line-height:1.5;color:var(--muted)}
+[data-intake] .in-file-note b{color:var(--ink)}
+[data-intake] .in-card{position:relative;padding:26px 28px;border-radius:22px;border:1px solid var(--line);background:radial-gradient(60% 90% at 100% 0%,color-mix(in srgb,var(--brand-text) 8%,transparent) 0%,transparent 60%),var(--surface);box-shadow:var(--shadow-rest);animation:inUp .3s ease}
+[data-intake] .in-card-head{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+[data-intake] .in-card-ic{width:42px;height:42px;flex:none;border-radius:13px;display:grid;place-items:center;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-intake] .in-card-title{margin:0;font-size:19px;font-weight:700;color:var(--ink)}
+[data-intake] .in-card-sub{margin-top:3px;font-size:13.5px;color:var(--muted)}
+[data-intake] .in-label{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+[data-intake] .in-label .req{color:var(--brand-text)}
+[data-intake] .in-roles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:22px}
+[data-intake] .in-role{position:relative;display:flex;flex-direction:row;align-items:center;gap:16px;padding:16px 18px;border-radius:16px;background:linear-gradient(180deg,color-mix(in srgb,var(--brand-text) 7%,var(--surface)) 0%,color-mix(in srgb,var(--brand-text) 2%,var(--surface)) 100%);border:1px solid color-mix(in srgb,var(--brand-text) 16%,var(--line));box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 6%,transparent);color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:transform .25s cubic-bezier(.22,1,.36,1),background .2s,border-color .2s,box-shadow .25s}
+[data-intake] .in-role:hover{border-color:var(--brand-text);background:var(--hover)}
+[data-intake] .in-role[aria-checked="true"]{border-color:color-mix(in srgb,var(--c) 70%,transparent);background:linear-gradient(160deg,color-mix(in srgb,var(--c) 20%,var(--surface)) 0%,color-mix(in srgb,var(--c) 7%,var(--surface)) 70%);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
+[data-intake] .in-role .art{width:64px;height:64px;flex:none;display:grid;place-items:center;border-radius:50%;color:var(--c);background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 14%,transparent),transparent);transition:transform .3s cubic-bezier(.3,1.4,.5,1)}
+[data-intake] .in-role .art .glyph{display:block;width:46px;height:46px;transform-origin:50% 80%;background:currentColor;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat;transition:filter .3s}
+[data-intake] .in-credit{margin:-14px 0 18px;font-size:10.5px;color:var(--faint)}
+[data-intake] .in-credit a{color:inherit;text-decoration:underline}
+[data-intake] .in-role[aria-checked="true"] .art .glyph{filter:drop-shadow(0 0 5px color-mix(in srgb,var(--c) 55%,transparent))}
+[data-intake] .in-role:hover .art{transform:scale(1.1)}
+[data-intake] .in-role:nth-child(1):hover .art .glyph{animation:inSway 1s ease-in-out infinite}
+[data-intake] .in-role:nth-child(2):hover .art .glyph{animation:inShake .6s ease-in-out infinite}
+[data-intake] .in-role[aria-checked="true"] .art{animation:inPop .45s cubic-bezier(.3,1.4,.5,1)}
+[data-intake] .in-role:active .art{transform:scale(.92)}
+@keyframes inSway{0%,100%{transform:rotate(0)}30%{transform:rotate(-7deg)}70%{transform:rotate(5deg)}}
+@keyframes inShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-2px) rotate(-3deg)}40%{transform:translateX(2px) rotate(3deg)}60%{transform:translateX(-1.5px)}80%{transform:translateX(1px)}}
+@keyframes inPop{0%{transform:scale(.8)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
+[data-intake] .in-role:hover .art .glyph{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--c) 70%,transparent))}
+[data-intake] .in-role .nm{display:block;padding-right:28px;font-size:15.5px;font-weight:700}
+[data-intake] .in-role .ur{margin-left:6px;font-size:13px;font-weight:500;color:var(--faint)}
+[data-intake] .in-role .ds{margin-top:3px;font-size:13px;color:var(--muted)}
+[data-intake] .in-role .eg{margin-top:5px;font-size:12px;color:var(--faint)}
+[data-intake] .in-role .tick{position:absolute;top:14px;right:14px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line-strong);color:transparent;transition:background .2s,border-color .2s,color .2s,transform .3s cubic-bezier(.3,1.4,.5,1)}
+[data-intake] .in-role[aria-checked="true"] .tick{background:var(--c);border-color:var(--c);color:#0d2a26;transform:scale(1.08)}
+[data-intake] .in-provs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+[data-intake] .in-prov{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 12px;border-radius:12px;background:linear-gradient(180deg,color-mix(in srgb,var(--c) 9%,var(--surface)) 0%,color-mix(in srgb,var(--c) 3%,var(--surface)) 100%);border:1px solid color-mix(in srgb,var(--c) 22%,var(--line));box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 6%,transparent);color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background .2s,border-color .2s,transform .15s}
+[data-intake] .in-prov:hover{border-color:var(--c);background:linear-gradient(180deg,color-mix(in srgb,var(--c) 14%,var(--hover)),var(--hover))}
+[data-intake] .in-prov:hover .pin{transform:scale(1.14)}
+[data-intake] .in-prov:hover .pin svg{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--c) 70%,transparent))}
+[data-intake] .in-prov .pin svg{transition:filter .3s}
+[data-intake] .in-prov:active{transform:scale(.97)}
+[data-intake] .in-prov .pin{display:grid;place-items:center;width:40px;height:40px;margin-bottom:4px;border-radius:0;color:var(--c);background:transparent;transition:transform .3s cubic-bezier(.3,1.4,.5,1),box-shadow .3s,color .2s,background .2s}
+[data-intake] .in-prov b{font-size:13.5px;font-weight:700;white-space:nowrap}
+[data-intake] .in-prov span{max-width:100%;font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-intake] .in-prov[aria-checked="true"]{border-color:color-mix(in srgb,var(--c) 65%,transparent);background:linear-gradient(160deg,color-mix(in srgb,var(--c) 20%,var(--surface)) 0%,color-mix(in srgb,var(--c) 7%,var(--surface)) 70%);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 14%,transparent)}
+[data-intake] .in-prov[aria-checked="true"] .pin{color:var(--c)}
+[data-intake] .in-prov[aria-checked="true"] .pin svg{filter:drop-shadow(0 0 5px color-mix(in srgb,var(--c) 55%,transparent))}
+[data-intake] .in-hint{margin-top:10px;font-size:12.5px;color:var(--faint)}
+[data-intake] .in-foot{display:flex;align-items:center;gap:14px;margin-top:26px;padding-top:18px;border-top:1px solid var(--line)}
+[data-intake] .in-foot .why{flex:1;font-size:12.5px;color:var(--muted)}
+[data-intake] .in-next{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 18px;border:0;border-radius:999px;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px -10px rgba(28,156,102,.8);transition:filter .15s,transform .15s,box-shadow .2s}
+[data-intake] .in-next:hover:not(:disabled){filter:brightness(1.06)}
+[data-intake] .in-next:active:not(:disabled){transform:scale(.94);box-shadow:0 3px 10px -6px rgba(28,156,102,.9)}
+[data-intake] .in-next:active:not(:disabled) svg{transform:translateX(6px)}
+[data-intake] .in-next svg{transition:transform .18s cubic-bezier(.3,1.4,.5,1)}
+[data-intake] .in-next:disabled{background:var(--chip-n);color:var(--faint);box-shadow:none;cursor:not-allowed}
+[data-intake] .in-ref{flex:none;display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:700;color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,transparent)}
+[data-intake] .in-mode{display:inline-flex;padding:3px;margin-bottom:12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line)}
+[data-intake] .in-mode button{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 14px;border:0;border-radius:999px;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .2s,color .2s}
+[data-intake] .in-mode button:hover{color:var(--hover-ink)}
+[data-intake] .in-mode button[aria-pressed="true"]{background:color-mix(in srgb,var(--brand-text) 16%,transparent);color:var(--brand-text);font-weight:700}
+[data-intake] .in-compose{position:relative;border-radius:16px;border:1px solid var(--line-strong);background:var(--input);overflow:hidden;transition:border-color .2s,box-shadow .2s}
+[data-intake] .in-compose:focus-within{border-color:var(--brand-text);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 16%,transparent)}
+[data-intake] .in-compose textarea{display:block;width:100%;box-sizing:border-box;min-height:150px;resize:vertical;padding:14px 16px;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:14.5px;line-height:1.6}
+[data-intake] .in-compose textarea::placeholder{color:var(--faint)}
+[data-intake] .in-compose-foot{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--faint)}
+[data-intake] .in-ghost{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
+[data-intake] .in-ghost:hover{background:var(--hover-tint)}
+[data-intake] .in-detect{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:14px;padding:10px 14px;border-radius:14px;font-size:13.5px;color:var(--ink);background:color-mix(in srgb,var(--brand-text) 7%,transparent);border:1px dashed color-mix(in srgb,var(--brand-text) 40%,transparent)}
+[data-intake] .in-detect b{color:var(--brand-text)}
+[data-intake] .in-detect .muted{font-size:12.5px;color:var(--faint)}
+[data-intake] .in-chip{display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+[data-intake] .in-chip:hover{background:var(--hover-tint);color:var(--ink)}
+[data-intake] .in-chip[aria-checked="true"]{border-color:color-mix(in srgb,var(--brand-text) 60%,transparent);background:color-mix(in srgb,var(--brand-text) 13%,transparent);color:var(--brand-text)}
+[data-intake] .in-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:20px}
+[data-intake] .in-seg{display:flex;padding:3px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+[data-intake] .in-seg button{flex:1;min-width:0;height:34px;padding:0 8px;border:0;border-radius:9px;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background .2s,color .2s}
+[data-intake] .in-seg button:hover{color:var(--hover-ink)}
+[data-intake] .in-seg button[aria-checked="true"]{background:color-mix(in srgb,var(--brand-text) 16%,transparent);color:var(--brand-text);font-weight:700}
+[data-intake] .in-urg button[aria-checked="true"][data-u="low"]{background:color-mix(in srgb,#3ee0a1 18%,transparent);color:#3ee0a1}
+[data-intake] .in-urg button[aria-checked="true"][data-u="medium"]{background:var(--gold);color:#2b2410}
+[data-intake] .in-urg button[aria-checked="true"][data-u="high"]{background:#f59e0b;color:#2b1a05}
+[data-intake] .in-urg button[aria-checked="true"][data-u="urgent"]{background:#ef6b5e;color:#2a0d0a}
+[data-intake] .in-drop{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:12px;border-radius:14px;border:1.5px dashed var(--line-strong);background:var(--surface-2)}
+[data-intake] .in-drop-btn{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border:0;border-radius:10px;background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background .15s}
+[data-intake] .in-drop-btn:hover{background:var(--hover-tint)}
+[data-intake] .in-drop-btn b{display:block;font-size:13.5px}
+[data-intake] .in-drop-btn small{display:block;font-size:11px;color:var(--faint)}
+[data-intake] .in-input{width:100%;box-sizing:border-box;padding:10px 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--input);color:var(--ink);font:inherit;font-size:13.5px;line-height:1.5;resize:vertical;outline:none;transition:border-color .2s,box-shadow .2s}
+[data-intake] .in-input:focus{border-color:var(--brand-text);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 16%,transparent)}
+[data-intake] .in-back{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,transform .18s cubic-bezier(.3,1.4,.5,1)}
+[data-intake] .in-back:hover{background:var(--hover-tint)}
+[data-intake] .in-back:active{transform:translateX(-5px) scale(.95)}
+[data-intake] .in-qbars{display:flex;gap:6px;flex:none}
+[data-intake] .in-qbars i{width:26px;height:6px;border-radius:6px;background:var(--line);transition:background .3s}
+[data-intake] .in-qbars i[data-on]{background:var(--brand-text)}
+[data-intake] .in-qbars i[data-now]{background:linear-gradient(90deg,var(--brand-text) 50%,var(--line) 50%)}
+[data-intake] .in-thread{display:flex;flex-direction:column;gap:14px;min-height:180px}
+[data-intake] .in-msg{display:flex;gap:10px;align-items:flex-start;max-width:86%;animation:inUp .3s ease}
+[data-intake] .in-msg.me{align-self:flex-end;max-width:72%}
+[data-intake] .in-ai{width:32px;height:32px;flex:none;border-radius:10px;display:grid;place-items:center;font-size:14px;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 16%,transparent)}
+[data-intake] .in-bub{padding:11px 14px;border-radius:4px 16px 16px 16px;background:var(--surface-2);border:1px solid var(--line);font-size:14px;line-height:1.55;color:var(--ink)}
+[data-intake] .in-bub[data-now]{border-color:color-mix(in srgb,var(--brand-text) 45%,transparent)}
+[data-intake] .in-msg.me .in-bub{border-radius:16px 4px 16px 16px;border:0;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff}
+[data-intake] .in-qn{display:block;margin-bottom:4px;font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--brand-text)}
+[data-intake] .in-answer{display:flex;flex-direction:column;gap:8px;margin-left:42px}
+[data-intake] .in-answer textarea{width:100%;box-sizing:border-box;min-height:64px;padding:12px 14px;border-radius:14px;border:1px solid var(--brand-text);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 14%,transparent);background:var(--input);color:var(--ink);font:inherit;font-size:14px;line-height:1.5;resize:vertical;outline:none}
+[data-intake] .in-quick{display:flex;gap:6px;flex-wrap:wrap}
+[data-intake] .in-typing{display:inline-flex;gap:4px;margin-left:8px;vertical-align:middle}
+[data-intake] .in-typing i{width:6px;height:6px;border-radius:50%;background:var(--brand-text);animation:inDot 1s ease-in-out infinite}
+[data-intake] .in-typing i:nth-child(2){animation-delay:.15s}
+[data-intake] .in-typing i:nth-child(3){animation-delay:.3s}
+@keyframes inDot{0%,100%{opacity:.3;transform:none}50%{opacity:1;transform:translateY(-3px)}}
+[data-intake] .in-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+[data-intake] .in-facts div{padding:12px 14px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line)}
+[data-intake] .in-facts small{display:block;font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+[data-intake] .in-facts b{display:block;margin-top:4px;font-size:15px;color:var(--ink)}
+[data-intake] .in-facts b[data-u="medium"]{color:var(--gold)}
+[data-intake] .in-facts b[data-u="high"],[data-intake] .in-facts b[data-u="urgent"]{color:#ef6b5e}
+[data-intake] .in-sections{display:flex;flex-direction:column;gap:12px}
+[data-intake] .in-cats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+[data-intake] .in-cat{display:flex;flex-direction:column;align-items:flex-start;gap:5px;padding:16px;border-radius:16px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:transform .2s,background .2s,border-color .2s}
+[data-intake] .in-cat:hover:not(:disabled){transform:translateY(-2px);background:var(--hover-tint)}
+[data-intake] .in-cat:disabled{cursor:default}
+[data-intake] .in-cat small{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--brand-text)}
+[data-intake] .in-cat b{font-size:16px}
+[data-intake] .in-cat span{font-size:12.5px;color:var(--muted);line-height:1.45}
+[data-intake] .in-cat[aria-checked="true"]{border-color:color-mix(in srgb,var(--brand-text) 70%,transparent);background:color-mix(in srgb,var(--brand-text) 12%,var(--surface-2));box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 16%,transparent)}
+[data-intake] .in-open{display:flex;align-items:center;gap:16px;margin-top:20px;padding:18px 20px;border-radius:18px;background:linear-gradient(135deg,color-mix(in srgb,#12897f 35%,transparent),color-mix(in srgb,#1c9c66 12%,transparent));border:1px solid color-mix(in srgb,var(--brand-text) 35%,transparent)}
+[data-intake] .in-open b{display:block;font-size:16px;color:var(--ink)}
+[data-intake] .in-open span{display:block;margin-top:2px;font-size:13px;line-height:1.5;color:var(--muted)}
+[data-intake] .in-open-ic{width:46px;height:46px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--brand-text);color:#0d2a26}
+[data-intake] .in-done{margin-top:20px;padding:26px;border-radius:22px;text-align:center;background:radial-gradient(70% 120% at 50% 0%,color-mix(in srgb,var(--brand-text) 22%,transparent),transparent 70%),var(--surface-2);border:1px solid color-mix(in srgb,var(--brand-text) 40%,transparent);animation:inUp .4s ease}
+[data-intake] .in-done-ic{display:inline-grid;place-items:center;width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#12897f,#3ee0a1);color:#fff;box-shadow:0 0 0 10px color-mix(in srgb,var(--brand-text) 12%,transparent)}
+[data-intake] .in-done h3{margin:14px 0 0;font-size:22px;font-weight:700;color:var(--ink)}
+[data-intake] .in-done p{margin:6px auto 0;max-width:520px;font-size:14px;line-height:1.6;color:var(--muted)}
+[data-intake] .in-nexts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+[data-intake] .in-nx{--c:var(--brand-text);display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:16px;border-radius:18px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:transform .2s,border-color .2s,box-shadow .2s}
+[data-intake] .in-nx:hover:not(:disabled){transform:translateY(-3px);border-color:color-mix(in srgb,var(--c) 50%,transparent);box-shadow:0 14px 28px -18px color-mix(in srgb,var(--c) 80%,#000)}
+[data-intake] .in-nx:disabled{opacity:.5;cursor:not-allowed}
+[data-intake] .in-nx[data-main]{border-color:color-mix(in srgb,var(--brand-text) 40%,transparent)}
+[data-intake] .in-nx .ic{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+[data-intake] .in-nx b{font-size:15px}
+[data-intake] .in-nx span:last-child{font-size:12.5px;color:var(--muted);line-height:1.45}
+[data-intake] .in-voice{display:flex;flex-direction:column;gap:10px}
+[data-intake] .in-rec{display:flex;align-items:center;gap:14px;padding:10px 12px 10px 10px;border-radius:999px;border:1px solid var(--line-strong);background:var(--input)}
+[data-intake] .in-voice[data-state="recording"] .in-rec{border-color:color-mix(in srgb,var(--danger) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 14%,transparent)}
+[data-intake] .in-mic{position:relative;width:46px;height:46px;flex:none;border-radius:50%;border:0;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,#12897f,#1c9c66);cursor:pointer;box-shadow:0 6px 16px -8px rgba(28,156,102,.9);transition:transform .2s,filter .2s}
+[data-intake] .in-mic:hover:not(:disabled){transform:scale(1.06);filter:brightness(1.08)}
+[data-intake] .in-mic:disabled{opacity:.5;cursor:not-allowed}
+[data-intake] .in-mic[aria-pressed="true"]{background:var(--danger);box-shadow:0 0 0 0 color-mix(in srgb,var(--danger) 50%,transparent);animation:inMicPulse 1.4s ease-out infinite}
+@keyframes inMicPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--danger) 55%,transparent)}100%{box-shadow:0 0 0 12px transparent}}
+[data-intake] .in-wave{flex:1;min-width:0;height:30px;display:flex;align-items:center;gap:3px;overflow:hidden}
+[data-intake] .in-wave i{flex:1;min-width:2px;max-width:5px;border-radius:3px;background:color-mix(in srgb,var(--brand-text) 35%,transparent);transform:scaleY(.25);transform-origin:center;transition:transform .3s}
+[data-intake] .in-voice[data-state="recording"] .in-wave i{background:var(--brand-text);animation:inWave .9s ease-in-out infinite}
+[data-intake] .in-voice[data-state="ready"] .in-wave i,[data-intake] .in-voice[data-state="stopped"] .in-wave i{transform:scaleY(.6)}
+@keyframes inWave{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
+[data-intake] .in-time{flex:none;min-width:48px;font:700 15px "JetBrains Mono",monospace;color:var(--brand-text);text-align:right}
+[data-intake] .in-voice[data-state="recording"] .in-time{color:var(--danger)}
+[data-intake] .in-vstatus{display:flex;align-items:center;gap:8px;padding-left:16px;font-size:12.5px;font-weight:600}
+[data-intake] .in-vstatus .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+[data-intake] .in-transcript{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:16px;background:var(--surface-2);border:1px solid var(--line)}
+[data-intake] .in-tr-head{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink)}
+[data-intake] .in-bot{width:30px;height:30px;flex:none;border-radius:10px;display:grid;place-items:center;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-intake] .in-tag{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--muted);background:var(--surface)}
+[data-intake] .in-tag[data-tone="danger"]{color:var(--danger);background:var(--danger-soft)}
+[data-intake] .in-tag[data-tone="warn"]{color:var(--gold);background:color-mix(in srgb,var(--gold) 14%,transparent)}
+[data-intake] .in-tag[data-tone="success"],[data-intake] .in-tag[data-tone="info"]{color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 14%,transparent)}
+[data-intake] .in-transcript textarea{width:100%;box-sizing:border-box;min-height:84px;padding:10px 12px;border-radius:12px;border:1px solid var(--line-strong);background:var(--input);color:var(--ink);font:inherit;font-size:14px;line-height:1.6;resize:vertical;outline:none}
+[data-intake] .in-transcript textarea:focus{border-color:var(--brand-text)}
+[data-intake] .in-tr-empty{font-size:13px;line-height:1.55;color:var(--faint)}
+[data-intake] .in-tr-actions{display:flex;justify-content:flex-end;gap:8px}
+[data-intake] .in-ftype{flex:none;min-width:34px;height:22px;padding:0 6px;box-sizing:border-box;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:800;letter-spacing:.04em;color:#ff8a80;background:color-mix(in srgb,#ff8a80 14%,transparent)}
+[data-intake] .in-ftype[data-k="IMG"]{color:#6aa8ff;background:color-mix(in srgb,#6aa8ff 14%,transparent)}
+[data-intake] .in-ftype[data-k="DOC"]{color:var(--gold);background:color-mix(in srgb,var(--gold) 14%,transparent)}
+[data-intake] .in-role,[data-intake] .in-prov{position:relative;overflow:hidden;border:1px solid color-mix(in srgb,var(--c) 14%,var(--line));background:radial-gradient(120% 110% at 100% 0%,color-mix(in srgb,var(--c) 13%,transparent) 0%,transparent 55%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 84%,#fff 16%) 0%,color-mix(in srgb,var(--surface) 94%,#fff 6%) 45%,var(--surface) 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 -3px 0 rgba(0,0,0,.22),0 2px 3px rgba(0,0,0,.18),0 14px 28px -14px rgba(0,0,0,.7);transition:transform .22s cubic-bezier(.22,1,.36,1),box-shadow .22s ease,border-color .18s ease,background .18s ease}
+[data-intake] .in-role{border-radius:20px;padding:18px}
+[data-intake] .in-prov{border-radius:16px}
+[data-intake] .in-role:hover,[data-intake] .in-prov:hover{border-color:color-mix(in srgb,var(--c) 45%,var(--line));background:radial-gradient(120% 110% at 100% 0%,color-mix(in srgb,var(--c) 20%,transparent) 0%,transparent 60%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 80%,#fff 20%) 0%,color-mix(in srgb,var(--surface) 92%,#fff 8%) 45%,var(--surface) 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),inset 0 -3px 0 rgba(0,0,0,.22),0 2px 3px rgba(0,0,0,.18),0 18px 32px -16px color-mix(in srgb,var(--c) 70%,#000)}
+[data-intake] .in-role[aria-checked="true"],[data-intake] .in-prov[aria-checked="true"]{border-color:color-mix(in srgb,var(--c) 70%,transparent);background:radial-gradient(120% 120% at 100% 0%,color-mix(in srgb,var(--c) 26%,transparent) 0%,transparent 60%),linear-gradient(180deg,color-mix(in srgb,var(--c) 18%,color-mix(in srgb,var(--surface) 86%,#fff 14%)) 0%,color-mix(in srgb,var(--c) 8%,var(--surface)) 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -3px 0 rgba(0,0,0,.2),0 0 0 3px color-mix(in srgb,var(--c) 16%,transparent),0 16px 30px -20px color-mix(in srgb,var(--c) 70%,#000)}
+[data-intake] .in-role::after,[data-intake] .in-prov::after{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(255,255,255,.035),transparent);transform:translateX(-130%) skewX(-20deg)}
+[data-intake] .in-role:hover::after,[data-intake] .in-prov:hover::after{animation:inShine .85s ease}
+[data-intake] .in-role:hover,[data-intake] .in-prov:hover{transform:translateY(-3px)}
+[data-intake] .in-role:active,[data-intake] .in-prov:active{transform:translateY(-1px) scale(.99)}
+@keyframes inShine{from{transform:translateX(-130%) skewX(-20deg)}to{transform:translateX(330%) skewX(-20deg)}}
+@keyframes inUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){[data-intake] *{animation:none!important;transition:none!important}}`;
+
+// What each province means for the case (shown under its name).
+const PROVINCE_NOTE = {
+    punjab: "Lahore, Rawalpindi, Multan…",
+    sindh: "Karachi, Hyderabad, Sukkur…",
+    kpk: "Peshawar, Mardan, Swat…",
+    balochistan: "Quetta, Gwadar, Turbat…",
+    federal: "Islamabad (ICT)",
+};
+// Each province's own accent (2026-10-11), from the same palette as the
+// Lawyers page's area chips so the whole client UI shares one set of hues:
+// Punjab's green, Sindh's ajrak red, KPK's glacier blue, Balochistan's desert
+// gold, and a quiet violet for the capital.
+const PROVINCE_COLOR = {
+    punjab: "#5AD69A", sindh: "#F28B80", kpk: "#6ADDEB", balochistan: "#F2C35E", federal: "#B9A6F2",
+};
+const PROVINCE_SHORT = { punjab: "Punjab", sindh: "Sindh", kpk: "KPK", balochistan: "Balochistan", federal: "Federal" };
+
+// A landmark for each province (2026-10-11): duotone line drawings in the
+// theme's own colour -- a soft tinted fill under a crisp outline.
+const _pi = (children) => (
+    <svg width={34} height={34} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{children}</svg>
+);
+const _tint = { fill: "currentColor", fillOpacity: 0.2 };
+const PROVINCE_ICON = {
+    // Minar-e-Pakistan, Lahore: the flared base, the tapering shaft, the kiosk.
+    punjab: _pi(<>
+        <path {..._tint} d="M11 41c2.5-6 6-9.5 9.5-11h7c3.5 1.5 7 5 9.5 11z" />
+        <path {..._tint} d="M20.6 30 22 10h4l1.4 20z" />
+        <path d="M21.2 22h5.6M21.6 16h4.8" />
+        <path {..._tint} d="M21.5 10V8.2a2.5 2.5 0 0 1 5 0V10z" />
+        <path d="M24 5.7V3M7 41h34" />
+    </>),
+    // Makli, Thatta: a domed tomb on an arcaded base, with corner kiosks.
+    sindh: _pi(<>
+        <path {..._tint} d="M10 41V25h28v16" />
+        <path d="M16 41v-7a3 3 0 0 1 6 0v7M26 41v-7a3 3 0 0 1 6 0v7" />
+        <path d="M14.5 25v-3h19v3" />
+        <path {..._tint} d="M16 22c0-6.2 3.6-10 8-10s8 3.8 8 10z" />
+        <path d="M24 12V8.5M9 25c0-3 1.4-4.6 3-4.6s3 1.6 3 4.6M33 25c0-3 1.4-4.6 3-4.6s3 1.6 3 4.6M6 41h36" />
+    </>),
+    // Bab-e-Khyber: twin crenellated towers and the gate's arch.
+    kpk: _pi(<>
+        <path {..._tint} d="M8 41V17h8v24M32 41V17h8v24" />
+        <path d="M8 17v-3h2v2h4v-2h2v3M32 17v-3h2v2h4v-2h2v3" />
+        <path {..._tint} d="M16 41V25h16v16" />
+        <path d="M20 41v-8a4 4 0 0 1 8 0v8M16 25v-3h16v3M5 41h38" />
+    </>),
+    // Balochistan: the province's outline, Quetta marked.
+    balochistan: _pi(<>
+        <path {..._tint} d="M7 15 15 9l7 2 5-5 8 2 4 6-2 6 4 4-3 6 1 6-5 2-5 3-8-1-7 2-5-1 1-7-3-6 3-6z" />
+        <circle cx="31" cy="15" r="2.2" fill="currentColor" stroke="none" />
+        <path d="M9 41c2-1 4-1 6 0s4 1 6 0 4-1 6 0" opacity=".55" />
+    </>),
+    // Faisal Mosque, Islamabad: the tent-like hall between pencil minarets.
+    federal: _pi(<>
+        <path {..._tint} d="M14 40 24 15l10 25z" />
+        <path d="M24 15l-3 25M24 15l3 25" />
+        <path d="M8 40V13l1-3.5 1 3.5v27M38 40V13l1-3.5 1 3.5v27" />
+        <path d="M12.5 40V19l.8-2.6.8 2.6V40M33.9 40V19l.8-2.6.8 2.6V40" opacity=".6" />
+        <path d="M4 40.5h40" />
+    </>),
+};
+
 const STitle = ({ icon, sub, children }) => {
     const t = useT();
     return (
@@ -214,6 +518,35 @@ const ModIntake = () => {
         T("Categorization", "درجہ بندی"),
     ];
     const completedSteps = Math.max(0, step - 1);
+    const [fileOpen, setFileOpen] = useState(false);
+    const caseTypePicked = useRef(false);
+    // The rail (2026-10-10): each step's name, and a line saying what was
+    // chosen once it is done. The case file shows the same answers.
+    const caseTypeName = CASE_TYPES.find(c => c.value === caseTypeInput)?.label?.replace(" Law", "") || "";
+    const answeredCount = [clarifyA1, clarifyA2, clarifyA3, clarifyA4].filter(a => (a || "").trim()).length;
+    const readyFiles = evidenceFiles.filter(f => f.file_id && !f.uploading && !f.error).length;
+    const filesText = readyFiles ? `${readyFiles} ${readyFiles === 1 ? T("file", "فائل") : T("files", "فائلیں")}` : "";
+    const roleName = role === "Plaintiff" ? T("Plaintiff", "مدعی") : role === "Defendant" ? T("Defendant", "مدعا علیہ") : "";
+    const railSteps = [
+        { title: T("About you", "آپ کے بارے میں"), text: T("Role and province", "کردار اور صوبہ"),
+          doneText: [roleName, PROVINCE_SHORT[province]].filter(Boolean).join(" · ") },
+        { title: T("Your story", "آپ کی کہانی"), text: T("What happened, evidence", "کیا ہوا، ثبوت"),
+          doneText: [caseTypeName, filesText].filter(Boolean).join(" · ") },
+        { title: T("A few questions", "چند سوالات"), text: T("Up to 4, from the AI", "اے آئی سے، زیادہ سے زیادہ 4"),
+          nowText: clarifyRound >= 1 && clarifyRound <= 4 ? `${T("Question", "سوال")} ${clarifyRound} ${T("of up to 4", "از 4")}` : "",
+          doneText: answeredCount ? `${answeredCount} ${T("answered", "جواب دیے")}` : clarifyDone ? T("No questions needed", "سوال کی ضرورت نہیں") : "" },
+        { title: T("Review", "جائزہ"), text: T("Your structured case", "آپ کا منظم کیس"), doneText: T("Summary checked", "خلاصہ دیکھ لیا") },
+        { title: T("Confirm", "تصدیق"), text: T("Category, then a lawyer", "زمرہ، پھر وکیل") },
+    ];
+    const caseFileRows = [
+        [T("Role", "کردار"), roleName, step === 1],
+        [T("Province", "صوبہ"), PROVINCE_SHORT[province] || "", step === 1],
+        [T("Case type", "کیس کی قسم"), caseTypeName, step === 2],
+        [T("Urgency", "فوریت"), step >= 2 && urgency ? urgency.charAt(0).toUpperCase() + urgency.slice(1) : "", step === 2],
+        [T("Evidence", "ثبوت"), filesText, step === 2],
+        [T("Questions", "سوالات"), answeredCount ? `${answeredCount} ${T("of up to 4", "از 4")}` : "", step === 3],
+    ];
+    const caseFileFilled = caseFileRows.filter(r => r[1]).length;
     const progress = (completedSteps / steps.length) * 100;
     const ocrReviewComplete = ocrReviewFileIds.length > 0
         && ocrReviewPages.length > 0
@@ -859,6 +1192,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         }
 
         const savedToken = intakeToken;
+        let analysisFailed = false;
         const { data: converted, error: convErr } = await intakeConvert(savedToken, {
             language: voiceLang?.code || "en",
             urgency,
@@ -920,11 +1254,18 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
             if (intake?.ai_structured_case?.summary && intake.ai_structured_case.summary !== "pending") {
                 setAiStructured(intake.ai_structured_case);
             }
+            analysisFailed = intake?.ai_structured_case?.grounding_status === "pipeline_failed";
         }
 
         setOcrReviewRequired(false);
         setConverting(false);
-        toast.show("✅ Case analysis complete", "success", 3000);
+        // Say what happened. A case is created even when the AI analysis fails,
+        // and "analysis complete" over a screen saying it did not run is false.
+        if (analysisFailed) {
+            toast.show("Your case was created, but the AI analysis was unavailable. A lawyer can still review it.", "warn", 5000);
+        } else {
+            toast.show("✅ Case analysis complete", "success", 3000);
+        }
         setStep(4);
     };
 
@@ -1010,7 +1351,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     };
 
     // ── Voice state ────────────────────────────────────────────────
-    const [inputType, setInputType] = useState("voice");
+    const [inputType, setInputType] = useState("text");
     const [voiceStatus, setVoiceStatus] = useState("idle");
     const isRecording  = voiceStatus === "recording";
     const transcribing = voiceStatus === "transcribing";
@@ -1126,7 +1467,8 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     };
 
     return (
-        <div>
+        <div data-intake>
+            <style>{INTAKE_CSS}</style>
             {intakeBootError && (
                 <Card style={{ padding: 16, marginBottom: 16, border: `1px solid ${t.danger}55` }}>
                     <div style={{ color: t.danger, fontSize: 13, marginBottom: 10 }}>{intakeBootError}</div>
@@ -1135,250 +1477,250 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                     </BtnOutline>
                 </Card>
             )}
-            {/* Compact horizontal stepper */}
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 28, padding: "12px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, gap: 0 }}>
-                {steps.map((s, i) => {
+            {/* The page's own title, as Lawyers and Documents have (2026-10-10). */}
+            <div className="in-head">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h1 className="in-title" style={{ fontFamily: DOCS_FONT }}>{T("Legal Intake", "قانونی درخواست")}</h1>
+                    <div className="in-sub" style={{ fontFamily: DOCS_FONT }}>{T("Tell us about your matter — we turn it into a structured case you can send to a lawyer.", "اپنا معاملہ بتائیں — ہم اسے ایک منظم کیس بنا دیں گے جو آپ وکیل کو بھیج سکیں۔")}</div>
+                </div>
+                <span className="in-meta"><span className="dot" aria-hidden="true" />{T("Saved after each step", "ہر مرحلے کے بعد محفوظ")}</span>
+                <button type="button" className="in-filebtn" aria-expanded={fileOpen} aria-controls="in-case-file" onClick={() => setFileOpen(o => !o)}>
+                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
+                    {T("Case file", "کیس فائل")}
+                    <span className="n" aria-label={`${caseFileFilled} ${T("filled", "بھرے")}`}>{caseFileFilled}</span>
+                </button>
+            </div>
+
+            {/* The layout (2026-10-10, approved design): steps on the left, the
+                step's work in the middle, the case file filling in on the right. */}
+            <div className="in-shell">
+            <nav className="in-rail" aria-label={T("Intake steps", "مراحل")}>
+                {railSteps.map((r, i) => {
                     const targetStep = i + 1;
                     const act = step === targetStep;
                     const done = step > targetStep;
                     const locked = !canGoToStep(targetStep) && !done && !act;
-                    const isLast = i === steps.length - 1;
-                    
                     return (
-                        <Fragment key={s}>
-                            <div 
-                                onClick={() => tryGoToStep(targetStep)}
-                                style={{
-                                    display: "flex", alignItems: "center", gap: 10,
-                                    cursor: locked ? "not-allowed" : "pointer",
-                                    opacity: locked ? 0.4 : 1,
-                                    transition: "all 0.2s",
-                                }}
-                            >
-                                {/* Step indicator */}
-                                <div style={{
-                                    width: 28, height: 28, borderRadius: "50%",
-                                    background: done ? t.success : act ? t.primary : t.inputBg,
-                                    color: (done || act) ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted,
-                                    fontSize: 12, fontWeight: 800,
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    boxShadow: act ? `0 0 0 3px ${t.primary}30, 0 4px 12px ${t.primary}25` : "none",
-                                    transition: "all 0.2s",
-                                }}>
-                                    {done ? <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> : targetStep}
-                                </div>
-                                
-                                {/* Step label — circles only on mobile */}
-                                {(!isMobile || act) && (
-                                    <div style={{
-                                        fontSize: 13, fontWeight: act ? 700 : 600,
-                                        color: act ? t.primary : done ? t.success : t.text,
-                                        whiteSpace: "nowrap",
-                                    }}>
-                                        {s}
-                                    </div>
-                                )}
-                            </div>
-                            
-                            {/* Connector line */}
-                            {!isLast && (
-                                <div style={{
-                                    flex: 1, height: 2,
-                                    background: done && step > targetStep + 1 ? t.success : t.border,
-                                    margin: "0 8px",
-                                    transition: "background 0.3s",
-                                }} />
-                            )}
-                        </Fragment>
+                        <button key={r.title} type="button" className="in-rstep" disabled={locked}
+                            aria-current={act ? "step" : undefined} data-done={done ? "" : undefined}
+                            onClick={() => { if (!act) tryGoToStep(targetStep); }}>
+                            <span className="num" aria-hidden="true">
+                                {done ? <Ic n="check" s={14} c="currentColor" /> : targetStep}
+                            </span>
+                            <span style={{ minWidth: 0 }}>
+                                {act && <span className="now">{T("Now", "ابھی")}</span>}
+                                <span className="t">{r.title}</span>
+                                <span className="d">{done && r.doneText ? r.doneText : act && r.nowText ? r.nowText : r.text}</span>
+                            </span>
+                        </button>
                     );
                 })}
-            </div>
+                <div className="in-rprog">
+                    <div className="bar" aria-hidden="true"><i style={{ width: `${Math.max(6, ((step - 1) / (railSteps.length - 1)) * 100)}%` }} /></div>
+                    {step < railSteps.length
+                        ? `${T("Step", "مرحلہ")} ${step} ${T("of", "از")} ${railSteps.length}`
+                        : T("Last step", "آخری مرحلہ")}
+                </div>
+            </nav>
+            <div className="in-main">
 
             {/* ── STEP 1: Role + Province ─────────────────────────────── */}
             {step === 1 && (
-                <Card className="aFadeUp">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
-                        <STitle icon="user" sub={T("Your role and province determine how we structure your case", "آپ کا کردار اور صوبہ طے کرتا ہے کہ ہم آپ کا کیس کیسے ترتیب دیں گے")}>{T("Select Your Role & Province", "اپنا کردار اور صوبہ منتخب کریں")}</STitle>
-                        <BtnPrimary
-                            disabled={!role || !province}
-                            onClick={handleStep1Continue}
-                            style={{ fontSize: 14, padding: "12px 32px" }}
-                        >{T("Continue →", "جاری رکھیں ←")}</BtnPrimary>
+                <section className="in-card">
+                    <header className="in-card-head">
+                        <span className="in-card-ic" aria-hidden="true"><Ic n="user" s={20} c="currentColor" /></span>
+                        <div>
+                            <h2 className="in-card-title">{T("First, who are you in this matter?", "پہلے بتائیں، اس معاملے میں آپ کون ہیں؟")}</h2>
+                            <div className="in-card-sub">{T("This decides how we structure your case and which law applies.", "اس سے طے ہوتا ہے کہ کیس کیسے بنے گا اور کون سا قانون لاگو ہوگا۔")}</div>
+                        </div>
+                    </header>
+
+                    <div className="in-label">{T("Your role", "آپ کا کردار")} <span className="req">*</span></div>
+                    <div className="in-roles" role="radiogroup" aria-label={T("Your role", "آپ کا کردار")}>
+                        {["Plaintiff", "Defendant"].map(r => {
+                            const plaintiff = r === "Plaintiff";
+                            return (
+                                <button key={r} type="button" role="radio" aria-checked={role === r} className="in-role"
+                                    style={{ "--c": plaintiff ? "#3ee0a1" : "#5fd0e6" }} onClick={() => setRole(r)}>
+                                    {/* Flaticon icons (credited below), painted in the card's colour
+                                        through a CSS mask so they follow the theme. */}
+                                    <span className="art" aria-hidden="true">
+                                        <span className="glyph" style={{ "--icon": `url(/icons/intake/${plaintiff ? "plaintiff" : "defendant"}.png)` }} />
+                                    </span>
+                                    <span style={{ minWidth: 0 }}>
+                                        <span className="nm">{plaintiff ? T("I'm taking action", "میں کارروائی کر رہا ہوں") : T("Someone acted against me", "میرے خلاف کارروائی ہوئی")}</span>
+                                        <span className="ds" style={{ display: "block", color: "var(--c)", fontWeight: 600 }}>{plaintiff ? "Plaintiff · مدعی" : "Defendant · مدعا علیہ"}</span>
+                                        <span className="eg" style={{ display: "block" }}>{plaintiff
+                                            ? T("e.g. recover money, claim property, seek khula or maintenance.", "مثلاً رقم کی واپسی، جائیداد، خلع یا نان نفقہ")
+                                            : T("e.g. you got a legal notice, a summons or an FIR.", "مثلاً قانونی نوٹس، سمن یا ایف آئی آر")}</span>
+                                    </span>
+                                    <span className="tick" aria-hidden="true"><Ic n="check" s={13} c="currentColor" /></span>
+                                </button>
+                            );
+                        })}
                     </div>
 
-                    {/* Role cards */}
-                    <div style={{ display: "flex", gap: 16, marginBottom: 24, marginTop: 8, flexDirection: isMobile ? "column" : "row" }}>
-                        {["Plaintiff", "Defendant"].map(r => (
-                            <div key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: 28, borderRadius: 18, border: `2.5px solid ${role === r ? t.primary : t.border}`, background: role === r ? t.primaryGlow : "transparent", cursor: "pointer", textAlign: "center", transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)", transform: role === r ? "scale(1.05)" : "scale(1)", boxShadow: role === r ? `0 12px 32px ${t.primary}25` : "none" }}>
-                                <div style={{ fontSize: 48, marginBottom: 14 }}>{r === "Plaintiff" ? "⚖️" : "🛡️"}</div>
-                                <div style={{ fontWeight: 800, color: t.text, fontSize: 18, fontFamily: "'Playfair Display',serif", marginBottom: 4 }}>{r === "Plaintiff" ? T("Plaintiff", "مدعی") : T("Defendant", "مدعا علیہ")}</div>
-                                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 6 }}>{r === "Plaintiff" ? T("Filing a legal claim", "قانونی دعویٰ دائر کرنا") : T("Responding to a claim", "دعوے کا جواب دینا")}</div>
-                            </div>
+                    <div className="in-credit">Icons: <a href="https://www.flaticon.com/free-icon/question_10032072" target="_blank" rel="noopener noreferrer">Plaintiff</a> · <a href="https://www.flaticon.com/free-icon/suspect_15869444" target="_blank" rel="noopener noreferrer">Defendant</a> — Flaticon</div>
+                    <div className="in-label">{T("Where is the matter?", "معاملہ کہاں کا ہے؟")} <span className="req">*</span></div>
+                    <div className="in-provs" role="radiogroup" aria-label={T("Province / Territory", "صوبہ / علاقہ")}>
+                        {PROVINCES.map(p => (
+                            <button key={p.value} type="button" role="radio" aria-checked={province === p.value} className="in-prov" style={{ "--c": PROVINCE_COLOR[p.value] }} onClick={() => setProvince(p.value)}>
+                                <span className="pin" aria-hidden="true">{PROVINCE_ICON[p.value]}</span>
+                                <b>{PROVINCE_SHORT[p.value] || p.label}</b>
+                                <span>{PROVINCE_NOTE[p.value]}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="in-hint">{T("Used to apply the correct jurisdiction and legal framework to your case.", "آپ کے کیس پر درست دائرہ اختیار اور قانون لاگو کرنے کے لیے۔")}</div>
+
+                    <footer className="in-foot">
+                        <span className="why">{!role || !province
+                            ? T("Choose your role and province to continue.", "جاری رکھنے کے لیے کردار اور صوبہ منتخب کریں۔")
+                            : T("Next: tell us what happened, in your own words.", "اگلا: اپنے الفاظ میں بتائیں کیا ہوا۔")}</span>
+                        <button type="button" className="in-next" disabled={!role || !province} onClick={handleStep1Continue}>
+                            {T("Continue", "جاری رکھیں")}
+                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                        </button>
+                    </footer>
+                </section>
+            )}
+
+            {/* ── STEP 2: Your story (2026-10-10, approved design) ─────── */}
+            {step === 2 && (
+                <section className="in-card in-story">
+                    <header className="in-card-head" style={{ marginBottom: 16 }}>
+                        <span className="in-card-ic" aria-hidden="true"><Ic n="pen" s={19} c="currentColor" /></span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <h2 className="in-card-title">{T("What happened?", "کیا ہوا؟")}</h2>
+                            <div className="in-card-sub">{T("Write it in your own words — English or Roman Urdu. Or speak it.", "اپنے الفاظ میں لکھیں — انگریزی یا رومن اردو۔ یا بول کر بتائیں۔")}</div>
+                        </div>
+                        {/* The REAL case reference, or nothing -- never a made-up number. */}
+                        {caseId && <span className="in-ref">{T("Case", "کیس")} …{caseId.slice(-8)}</span>}
+                    </header>
+
+                    <div className="in-mode" role="group" aria-label={T("How to describe it", "بیان کا طریقہ")}>
+                        {["text", "voice"].map(type => (
+                            <button key={type} type="button" aria-pressed={inputType === type} onClick={() => setInputType(type)}>
+                                <Ic n={type === "text" ? "pen" : "mic"} s={14} c="currentColor" />
+                                {type === "text" ? T("Text Input", "تحریری ان پٹ") : T("Voice Input", "آواز سے ان پٹ")}
+                            </button>
                         ))}
                     </div>
 
-                    {/* Province dropdown */}
-                    <div style={{ background: t.inputBg, border: `1.5px solid ${province ? t.primary : t.border}`, borderRadius: 14, padding: "18px 20px" }}>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>
-                            Province / Territory *
-                        </label>
-                        <select
-                            value={province}
-                            onChange={e => setProvince(e.target.value)}
-                            style={{ ...selectStyle, border: `1.5px solid ${province ? t.primary : t.border}`, color: province ? t.text : t.textMuted }}
-                        >
-                            <option value="">— Select your province —</option>
-                            {PROVINCES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                        </select>
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
-                            Used to apply the correct jurisdiction and legal framework to your case.
-                        </div>
-                    </div>
-                </Card>
-            )}
-
-            {/* ── STEP 2: Case Type + Description ─────────────────────── */}
-            {step === 2 && (
-                <Fragment>
-                    <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                        {/* Top nav bar */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
-                            <BtnOutline onClick={() => setStep(1)} style={{ fontSize: 13, padding: "8px 16px", border: "none" }}>← Back</BtnOutline>
-                            {/* The REAL case reference, or nothing.
-                                This was a hardcoded file number, shown to every
-                                client on every intake, on a screen where no case
-                                exists yet. A fabricated reference on a legal
-                                record is not decoration: a client could quote it
-                                to a court or to a lawyer. */}
-                            {caseId && (
-                                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${t.warn}40`, background: `${t.warn}15`, color: t.warn, fontSize: 12, fontWeight: 700 }}>
-                                    📁 Case …{caseId.slice(-8)}
+                    {inputType === "voice" ? (
+                        <div className="in-voice" data-state={voiceStatus}>
+                            {/* The recorder: one compact row. */}
+                            <div className="in-rec">
+                                <button type="button" className="in-mic" aria-pressed={isRecording}
+                                    aria-label={isRecording ? T("Stop recording", "ریکارڈنگ روکیں") : T("Start recording", "ریکارڈنگ شروع کریں")}
+                                    disabled={transcribing}
+                                    onClick={() => (isRecording ? stopRecording() : startRecording())}>
+                                    {isRecording ? (
+                                        <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" /></svg>
+                                    ) : (
+                                        <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="2.5" width="6" height="11.5" rx="3" /><path d="M5 10.5a7 7 0 0 0 14 0M12 17.5V21M8.5 21h7" /></svg>
+                                    )}
+                                </button>
+                                <div className="in-wave" aria-hidden="true">
+                                    {Array.from({ length: 28 }, (_, k) => <i key={k} style={{ animationDelay: `${(k % 7) * 0.09}s`, height: `${30 + ((k * 37) % 55)}%` }} />)}
                                 </div>
-                            )}
-                            <div style={{ flex: 1 }}></div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontSize: 12, fontWeight: 600, color: t.textMuted, whiteSpace: "nowrap" }}>{T("Urgency", "فوری نوعیت")}</span>
-                                <select
-                                    value={urgency}
-                                    onChange={e => setUrgency(e.target.value)}
-                                    style={{ fontSize: 13, fontWeight: 600, padding: "7px 12px", borderRadius: 8, border: `1.5px solid ${urgency === "urgent" ? "#ef4444" : urgency === "high" ? "#f97316" : urgency === "medium" ? t.warn : "#22c55e"}`, background: t.inputBg, color: urgency === "urgent" ? "#ef4444" : urgency === "high" ? "#f97316" : urgency === "medium" ? t.warn : "#22c55e", cursor: "pointer", outline: "none" }}
-                                >
-                                    <option value="low">🟢 {T("Low", "کم")}</option>
-                                    <option value="medium">🟡 {T("Medium", "درمیانی")}</option>
-                                    <option value="high">🟠 {T("High", "زیادہ")}</option>
-                                    <option value="urgent">🔴 {T("Urgent", "فوری")}</option>
-                                </select>
+                                <span className="in-time">{formatTime(recTime)}</span>
+                                <button type="button" className="in-ghost" onClick={handleConvert}
+                                    disabled={transcribing || isRecording || recTime === 0 || voiceStatus === "ready"}>
+                                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h10M4 12h16M4 17h7" /></svg>
+                                    {transcribing ? T("Converting…", "تبدیل ہو رہا ہے…") : T("Convert to Text", "متن میں بدلیں")}
+                                </button>
                             </div>
-                            <BtnPrimary onClick={handleStep2Continue} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Continue →", "جاری رکھیں ←")}</BtnPrimary>
-                        </div>
+                            <div className="in-vstatus" style={{ color: vui.color }} role="status">
+                                <span className="dot" aria-hidden="true" />
+                                {vui.text}
+                                {isRecording && recTime >= MAX_REC_SECS - 15 && <span style={{ opacity: 0.8 }}>({MAX_REC_SECS - recTime}s left)</span>}
+                            </div>
 
-
-                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 0.8fr", gap: 24 }}>
-                            {/* LEFT PANEL: Input Tab */}
-                            <div>
-                                <div style={{ display: "inline-flex", background: t.inputBg, borderRadius: 50, padding: 4, marginBottom: 16, border: `1px solid ${t.border}` }}>
-                                    {["text", "voice"].map(type => (
-                                        <button key={type} onClick={() => setInputType(type)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 20px", borderRadius: 40, border: "none", background: inputType === type ? t.primary : "transparent", color: inputType === type ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }}>
-                                            <Ic n={type === "text" ? "pen" : "mic"} s={14} c={inputType === type ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted} />
-                                            {type === "text" ? T("Text Input", "تحریری ان پٹ") : T("Voice Input", "آواز سے ان پٹ")}
-                                        </button>
-                                    ))}
+                            {/* What the AI heard -- editable before it is used. */}
+                            <div className="in-transcript">
+                                <div className="in-tr-head">
+                                    <span className="in-bot" aria-hidden="true">
+                                        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="8" width="16" height="12" rx="4" /><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16.5h5" /><circle cx="12" cy="3" r="1" /></svg>
+                                    </span>
+                                    <b>{T("AI transcription", "اے آئی ٹرانسکرپشن")}</b>
+                                    <span style={{ flex: 1 }} />
+                                    {vui.badgeType && <span className="in-tag" data-tone={vui.badgeType}>{vui.badgeLabel.replace(/^[^A-Za-z●]+\s*/, "")}</span>}
+                                    {voiceLang && <span className="in-tag">{voiceLang.name} · {Math.round(voiceLang.prob * 100)}%</span>}
                                 </div>
-
-                                {inputType === "voice" ? (
-                                    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-                                        <Card style={{ padding: "40px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 260 }}>
-                                            <div style={{ width: 80, height: 80, borderRadius: "50%", background: t.primaryGlow, border: `2px solid ${t.primary}50`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, boxShadow: `0 0 20px ${t.primaryGlow}`, cursor: "pointer", position: "relative" }} onClick={() => isRecording ? stopRecording() : startRecording()}>
-                                                <div style={{ position: "absolute", inset: -10, borderRadius: "50%", background: `${t.primary}20`, animation: isRecording ? "pulse 1.5s infinite" : "none" }} />
-                                                <Ic n="mic" s={32} c={t.primary} />
-                                            </div>
-                                            {isRecording ? (
-                                                <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-                                                    {[0,1,2,3,4,5,6,7].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: t.primary, animation: `pulse 1s ${i * 0.1}s infinite` }} />)}
-                                                </div>
-                                            ) : (
-                                                <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-                                                    {[0,1,2,3,4,5,6,7].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: t.primary + "50" }} />)}
-                                                </div>
-                                            )}
-                                            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: t.primary, marginBottom: 8 }}>{formatTime(recTime)}</div>
-                                            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: voiceStatus !== "idle" ? 600 : 400, color: vui.color }}>
-                                                <span>{vui.icon}</span>
-                                                <span>{vui.text}</span>
-                                                {isRecording && recTime >= MAX_REC_SECS - 15 && (
-                                                    <span style={{ fontSize: 11, opacity: 0.8 }}>({MAX_REC_SECS - recTime}s left)</span>
-                                                )}
-                                            </div>
-                                            <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-                                                <BtnOutline onClick={stopRecording} disabled={!isRecording} style={{ padding: "8px 16px", fontSize: 12, border: `1px solid ${t.border}`, color: isRecording ? t.danger : t.textMuted, display: "flex", alignItems: "center", gap: 6, opacity: isRecording ? 1 : 0.45, cursor: isRecording ? "pointer" : "not-allowed" }}><div style={{ width: 8, height: 8, background: isRecording ? t.danger : t.textMuted }} /> Stop</BtnOutline>
-                                                <BtnOutline onClick={handleConvert} disabled={transcribing || isRecording || recTime === 0 || voiceStatus === "ready"} style={{ padding: "8px 16px", fontSize: 12, border: `1px solid ${t.primary}`, color: t.primary, display: "flex", alignItems: "center", gap: 6, opacity: (transcribing || isRecording || recTime === 0 || voiceStatus === "ready") ? 0.45 : 1, cursor: (transcribing || isRecording || recTime === 0 || voiceStatus === "ready") ? "not-allowed" : "pointer" }}>{transcribing ? "Converting…" : "↻ Convert to Text"}</BtnOutline>
-                                            </div>
-                                        </Card>
-
-                                        <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, borderTop: `2px solid ${t.primary}`, display: "flex", flexDirection: "column" }}>
-                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                                                <div style={{ fontSize: 11, fontWeight: 800, color: t.primary, display: "flex", alignItems: "center", gap: 8, letterSpacing: "0.5px" }}><Ic n="bot" s={14} c={t.primary} /> AI TRANSCRIPTION</div>
-                                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                                    {vui.badgeType && <Badge type={vui.badgeType} style={{ padding: "4px 8px", fontSize: 10 }}>{vui.badgeLabel}</Badge>}
-                                                    {voiceLang && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 6, background: t.inputBg, color: t.textMuted, fontWeight: 600, letterSpacing: "0.3px" }}>{voiceLang.name} · {Math.round(voiceLang.prob * 100)}%</span>}
-                                                </div>
-                                            </div>
-                                            <div style={{ fontSize: 13, color: t.text, lineHeight: 1.8, marginBottom: 16, flex: 1, minHeight: 80 }}>
-                                                {transcribing ? (
-                                                    <span style={{ color: t.textMuted, fontStyle: "italic" }}>Transcribing audio…</span>
-                                                ) : voiceTranscript ? (
-                                                    <textarea value={voiceTranscript} onChange={e => setVoiceTranscript(e.target.value)}
-                                                        style={{ width: "100%", minHeight: 80, background: "transparent", border: "none", outline: "none", color: t.text, fontSize: 13, resize: "none", fontFamily: "inherit", lineHeight: 1.8 }} />
-                                                ) : (
-                                                    <span style={{ color: t.textFaint, fontStyle: "italic" }}>Record audio above then click "Convert to Text" to see the transcript here.</span>
-                                                )}
-                                            </div>
-                                            <div style={{ display: "flex", gap: 12 }}>
-                                                <BtnOutline onClick={handleSubmitVoice} disabled={!voiceTranscript.trim() || transcribing} style={{ padding: "8px 16px", fontSize: 12, borderColor: t.primary, color: t.primary, opacity: (!voiceTranscript.trim() || transcribing) ? 0.45 : 1, cursor: (!voiceTranscript.trim() || transcribing) ? "not-allowed" : "pointer" }}>Submit Voice Input ↑</BtnOutline>
-                                                <BtnOutline onClick={() => { setVoiceTranscript(""); setVoiceLang(null); audioChunksRef.current = []; setRecTime(0); setVoiceStatus("idle"); }} disabled={transcribing} style={{ padding: "8px 16px", fontSize: 12, borderColor: t.border, color: t.textMuted, opacity: transcribing ? 0.45 : 1, cursor: transcribing ? "not-allowed" : "pointer" }}>Clear</BtnOutline>
-                                            </div>
-                                        </Card>
-                                    </div>
+                                {transcribing ? (
+                                    <div className="in-tr-empty">{T("Transcribing audio…", "آڈیو متن میں بدل رہی ہے…")}<span className="in-typing"><i /><i /><i /></span></div>
+                                ) : voiceTranscript ? (
+                                    <textarea aria-label={T("Transcript", "متن")} value={voiceTranscript} onChange={e => setVoiceTranscript(e.target.value)} />
                                 ) : (
-                                    <Card style={{ padding: "40px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 260 }}>
-                                        <textarea
-                                            placeholder={T("Please describe the events leading up to your dispute in detail...", "براہ کرم اپنے تنازعے کے واقعات کی تفصیل لکھیں...")}
-                                            value={description}
-                                            onChange={e => {
-                                                setDescription(e.target.value);
-                                                const detected = quickClassify(e.target.value);
-                                                if (detected) setCaseTypeInput(detected);
-                                            }}
-                                            style={{ width: "100%", height: "100%", minHeight: 180, background: "transparent", border: "none", outline: "none", color: t.text, fontSize: 14, resize: "none", fontFamily: "inherit" }} />
-                                    </Card>
+                                    <div className="in-tr-empty">{T("Tap the mic, speak, then Convert to Text. You can edit the words before using them.", "مائیک دبائیں، بولیں، پھر متن میں بدلیں۔ استعمال سے پہلے الفاظ درست کر سکتے ہیں۔")}</div>
                                 )}
+                                <div className="in-tr-actions">
+                                    <button type="button" className="in-ghost" disabled={transcribing}
+                                        onClick={() => { setVoiceTranscript(""); setVoiceLang(null); audioChunksRef.current = []; setRecTime(0); setVoiceStatus("idle"); }}>{T("Clear", "صاف کریں")}</button>
+                                    <button type="button" className="in-next" style={{ height: 38, padding: "0 18px", fontSize: 13 }}
+                                        disabled={!voiceTranscript.trim() || transcribing} onClick={handleSubmitVoice}>{T("Submit Voice Input ↑", "آواز کا متن شامل کریں ↑")}</button>
+                                </div>
                             </div>
+                        </div>
+                    ) : (
+                        <div className="in-compose">
+                            <label htmlFor="in-story-text" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{T("Describe what happened", "بتائیں کیا ہوا")}</label>
+                            <textarea id="in-story-text" rows={6}
+                                placeholder={T("Please describe the events leading up to your dispute in detail...", "براہ کرم اپنے تنازعے کے واقعات کی تفصیل لکھیں...")}
+                                value={description}
+                                onChange={e => {
+                                    setDescription(e.target.value);
+                                    // The browser's guess, until the client picks one themselves.
+                                    if (caseTypePicked.current) return;
+                                    const detected = quickClassify(e.target.value);
+                                    if (detected) setCaseTypeInput(detected);
+                                }} />
+                            <div className="in-compose-foot">
+                                <span>{T("Don't include CNIC or phone numbers", "شناختی کارڈ یا فون نمبر نہ لکھیں")} · {description.length} {T("characters", "حروف")}</span>
+                                <span style={{ flex: 1 }} />
+                                <button type="button" className="in-ghost" onClick={() => setInputType("voice")}>
+                                    <Ic n="mic" s={14} c="var(--brand-text)" />{T("Speak instead", "بول کر بتائیں")}
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
-                            {/* RIGHT PANEL: Evidence + Desired Outcome */}
-                            <Card style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 0 }}>
-                                {/* Evidence toggle */}
-                                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-                                    <div style={{ width: 36, height: 36, borderRadius: 10, background: t.inputBg, display: "flex", alignItems: "center", justifyContent: "center" }}><Ic n="file" s={16} c={t.textMuted} /></div>
-                                    <div>
-                                        <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{T("Do you have evidence?", "کیا آپ کے پاس ثبوت ہیں؟")}</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{T("Documents, photos, or witnesses", "دستاویزات، تصاویر یا گواہ")}</div>
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-                                    {[{ v: true, label: "Yes, I have evidence" }, { v: false, label: "No evidence yet" }].map(({ v, label }) => (
-                                        <button key={String(v)} onClick={() => setHasEvidence(v)} style={{
-                                            flex: 1, padding: "10px 8px", borderRadius: 10,
-                                            border: `1.5px solid ${hasEvidence === v ? t.primary : t.border}`,
-                                            background: hasEvidence === v ? t.primaryGlow : "transparent",
-                                            color: hasEvidence === v ? t.primary : t.textMuted,
-                                            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                                        }}>{label}</button>
-                                    ))}
-                                </div>
-                                {hasEvidence && (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-                                        {/* Hidden file input */}
-                                        <input
+                    {/* What the browser's quick reading suggests; the client can correct it. */}
+                    <div className="in-detect">
+                        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="var(--brand-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" /></svg>
+                        <span>{caseTypeName
+                            ? <>{T("This reads like a", "یہ لگتا ہے")} <b>{caseTypeName}</b> {T("matter.", "معاملہ۔")}</>
+                            : T("Which area of law is this?", "یہ قانون کا کون سا شعبہ ہے؟")}</span>
+                        <span className="muted">{caseTypeName ? T("Not right? Pick one:", "درست نہیں؟ منتخب کریں:") : ""}</span>
+                        <span role="radiogroup" aria-label={T("Case type", "کیس کی قسم")} style={{ display: "contents" }}>
+                            {CASE_TYPES.map(c => (
+                                <button key={c.value} type="button" role="radio" aria-checked={caseTypeInput === c.value} className="in-chip" onClick={() => { caseTypePicked.current = true; setCaseTypeInput(c.value); }}>
+                                    {c.label.replace(" Law", "")}
+                                </button>
+                            ))}
+                        </span>
+                    </div>
+
+                    <div className="in-two">
+                        <div>
+                            <div className="in-label">{T("Evidence", "ثبوت")}</div>
+                            <div className="in-seg" role="radiogroup" aria-label={T("Do you have evidence?", "کیا آپ کے پاس ثبوت ہیں؟")}>
+                                {[{ v: true, label: T("Yes, I have evidence", "ہاں، ثبوت ہے") }, { v: false, label: T("No evidence yet", "ابھی ثبوت نہیں") }].map(({ v, label }) => (
+                                    <button key={String(v)} type="button" role="radio" aria-checked={hasEvidence === v} onClick={() => {
+                                        // Uploaded files are part of the case whatever this says; hiding
+                                        // them behind "No" would leave files the client cannot see or remove.
+                                        if (!v && evidenceFiles.some(f => !f.error)) {
+                                            toast.show("Remove your uploaded files first, or keep \"Yes\".", "warn", 3500);
+                                            return;
+                                        }
+                                        setHasEvidence(v);
+                                    }}>{label}</button>
+                                ))}
+                            </div>
+                            {hasEvidence && (
+                                <div className="in-drop">
+                                    <input
                                             ref={fileInputRef}
                                             type="file"
                                             multiple
@@ -1402,32 +1744,25 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                                 }
                                             }}
                                         />
-                                        {/* Drop zone / upload button */}
-                                        <div
-                                            onClick={() => fileInputRef.current?.click()}
-                                            style={{ border: `1.5px dashed ${t.primary}60`, borderRadius: 10, padding: "14px 12px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", background: `${t.primary}08`, transition: "background 0.15s" }}
-                                            onMouseEnter={e => e.currentTarget.style.background = `${t.primary}14`}
-                                            onMouseLeave={e => e.currentTarget.style.background = `${t.primary}08`}
-                                        >
-                                            <Ic n="file" s={15} c={t.primary} />
-                                            <span style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>{T("Upload Files", "فائلیں اپ لوڈ کریں")}</span>
-                                            {/* The REAL limits. This said "max 10 MB each" only, so a client hit
-     the file-count or total-size cap with no warning that either
-     existed — the caption described the one limit it knew about. */}
-                                            <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each · up to 12 files, 40 MB total</span>
-                                        </div>
-                                        {/* Uploaded file list */}
-                                        {evidenceFiles.length > 0 && (
+                                    <button type="button" className="in-drop-btn" onClick={() => fileInputRef.current?.click()}>
+                                        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="var(--brand-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
+                                        <span>
+                                            <b>{T("Upload Files", "فائلیں اپ لوڈ کریں")}</b>
+                                            {/* The REAL limits: count, size and total. */}
+                                            <small>PDF, Word, JPG, PNG · max 10 MB each · up to 12 files, 40 MB total</small>
+                                        </span>
+                                    </button>
+                                    {evidenceFiles.length > 0 && (
                                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                                                 {evidenceFiles.map(ef => {
-                                                    const icon = ef.content_type?.startsWith("image/") ? "🖼️" : ef.content_type === "application/pdf" ? "📄" : "📝";
+                                                    const icon = ef.content_type?.startsWith("image/") ? "IMG" : ef.content_type === "application/pdf" ? "PDF" : "DOC";
                                                     const kb   = ef.size ? `${(ef.size / 1024).toFixed(0)} KB` : "";
                                                     // Absent until the intake has been converted — extraction runs
                                                     // then, and before that there is nothing honest to claim.
                                                     const read = extractionLabel(ef);
                                                     return (
                                                         <div key={ef.file_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8, background: ef.error ? "#fef2f2" : t.inputBg, border: `1px solid ${ef.error ? "#fca5a5" : t.border}` }}>
-                                                            <span style={{ fontSize: 15 }}>{icon}</span>
+                                                            <span className="in-ftype" data-k={icon}>{icon}</span>
                                                             <div style={{ flex: 1, minWidth: 0 }}>
                                                                 <div style={{ fontSize: 12, fontWeight: 600, color: ef.error ? "#ef4444" : t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                                     {ef.filename}
@@ -1464,77 +1799,72 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                                 })}
                                             </div>
                                         )}
-                                        {/* Optional notes */}
-                                        <textarea
+                                    <textarea
                                             placeholder="Optional: add notes about witnesses, context, or additional evidence…"
                                             value={evidenceDesc}
                                             onChange={e => setEvidenceDesc(e.target.value)}
-                                            style={{ width: "100%", minHeight: 64, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 12, resize: "vertical", outline: "none", fontFamily: "inherit" }}
+                                            className="in-input" style={{ marginTop: 4, minHeight: 64, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 12, resize: "vertical", outline: "none", fontFamily: "inherit" }}
                                         />
-                                    </div>
-                                )}
-
-                                {/* Desired outcome */}
-                                <div style={{ paddingTop: 14, borderTop: `1.5px solid ${t.border}` }}>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>
-                                        Desired Outcome *
-                                    </label>
-                                    <textarea
-                                        placeholder="e.g. File FIR and seek bail, recover unpaid wages, gain custody of children…"
-                                        value={desiredOutcome}
-                                        onChange={e => setDesiredOutcome(e.target.value)}
-                                        style={{ width: "100%", minHeight: 88, background: t.inputBg, border: `1.5px solid ${desiredOutcome.trim() ? t.primary : t.border}`, borderRadius: 8, padding: "10px 12px", color: t.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit" }}
-                                    />
-                                    <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
-                                        Sent to the AI pipeline — helps generate a more targeted case analysis.
-                                    </div>
                                 </div>
-                            </Card>
+                            )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                            <div>
+                                <div className="in-label">{T("How urgent is it?", "کتنا فوری ہے؟")}</div>
+                                <div className="in-seg in-urg" role="radiogroup" aria-label={T("Urgency", "فوری نوعیت")}>
+                                    {[["low", T("Low", "کم")], ["medium", T("Medium", "درمیانی")], ["high", T("High", "زیادہ")], ["urgent", T("Urgent", "فوری")]].map(([v, label]) => (
+                                        <button key={v} type="button" role="radio" aria-checked={urgency === v} data-u={v} onClick={() => setUrgency(v)}>{label}</button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <label htmlFor="in-outcome" className="in-label" style={{ display: "flex" }}>{T("What outcome do you want?", "آپ کیا نتیجہ چاہتے ہیں؟")} <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>({T("optional", "اختیاری")})</span></label>
+                                <textarea id="in-outcome" className="in-input" rows={2}
+                                    placeholder="e.g. File FIR and seek bail, recover unpaid wages, gain custody of children…"
+                                    value={desiredOutcome}
+                                    onChange={e => setDesiredOutcome(e.target.value)} />
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                                    {[T("Get my money back", "میری رقم واپس"), T("Stop them", "انہیں روکنا"), T("Just advice", "صرف مشورہ")].map(o => (
+                                        <button key={o} type="button" className="in-chip" onClick={() => setDesiredOutcome(o)}>{o}</button>
+                                    ))}
+                                </div>
+                                <div className="in-hint" style={{ marginTop: 8 }}>{T("Helps the AI build a more targeted case analysis.", "اس سے اے آئی بہتر تجزیہ کرتا ہے۔")}</div>
+                            </div>
                         </div>
                     </div>
-                </Fragment>
+
+                    <footer className="in-foot">
+                        <button type="button" className="in-back" onClick={() => setStep(1)}>← {T("Back", "واپس")}</button>
+                        <span className="why">{T("Next: the AI asks up to 4 short questions.", "اگلا: اے آئی زیادہ سے زیادہ 4 مختصر سوال پوچھے گا۔")}</span>
+                        <button type="button" className="in-next" onClick={handleStep2Continue}>
+                            {T("Continue", "جاری رکھیں")}
+                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                        </button>
+                    </footer>
+                </section>
             )}
 
-            {/* ── STEP 3: AI Follow-up Questions (dynamic) ────────────── */}
+            {/* ── STEP 3: A few questions (2026-10-10, approved design) ─── */}
             {step === 3 && (
-                <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
-                        <BtnOutline onClick={() => setStep(2)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
-                        <div style={{ flex: 1 }} />
-                        {/* "Next Question" for rounds 1-3; "Complete & Continue" on round 4 or when done */}
-                        {!ocrReviewRequired && (clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
-                            <BtnPrimary
-                                disabled={clarifyLoading || !getCurrentAnswer().trim()}
-                                onClick={handleClarifyNext}
-                                style={{ fontSize: 13, padding: "8px 18px" }}
-                            >
-                                {clarifyLoading ? "Thinking…" : "Next Question →"}
-                            </BtnPrimary>
-                        ) : (
-                            <BtnPrimary
-                                disabled={converting || clarifyLoading || ocrReviewLoading
-                                    || (ocrReviewRequired && !ocrReviewComplete)
-                                    || (!ocrReviewRequired && clarifyRound === 4 && !clarifyA4.trim())}
-                                onClick={handleConvertAndSummarise}
-                                style={{ fontSize: 13, padding: "8px 18px", opacity: converting ? 0.7 : 1 }}
-                            >
-                                {converting ? "Analysing case…"
-                                    : ocrReviewLoading ? "Loading extracted text…"
-                                    : ocrReviewRequired ? "Continue analysis →"
-                                    : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
-                            </BtnPrimary>
+                <section className="in-card">
+                    <header className="in-card-head">
+                        <span className="in-card-ic" aria-hidden="true">
+                            <svg width={19} height={19} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" /></svg>
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <h2 className="in-card-title">{ocrReviewRequired ? T("Review Extracted Text", "نکالا گیا متن دیکھیں") : T("A few questions to strengthen your case", "آپ کے کیس کو مضبوط کرنے کے لیے چند سوال")}</h2>
+                            <div className="in-card-sub">{ocrReviewRequired
+                                ? T("OCR can misread names, dates and amounts. Compare each page with the original and correct it before confirming.", "او سی آر نام، تاریخیں اور رقم غلط پڑھ سکتا ہے۔ ہر صفحہ اصل سے ملا کر درست کریں۔")
+                                : T("One at a time. Answer what you know — \"I don't know\" is fine.", "ایک وقت میں ایک۔ جو معلوم ہو وہ لکھیں — \"معلوم نہیں\" بھی ٹھیک ہے۔")}</div>
+                        </div>
+                        {!ocrReviewRequired && (
+                            <span className="in-qbars" aria-label={`${answeredCount} ${T("of up to 4 answered", "از 4 جواب دیے")}`}>
+                                {[1, 2, 3, 4].map(n => (
+                                    <i key={n} data-on={n <= answeredCount || clarifyDone ? "" : undefined} data-now={!clarifyDone && n === clarifyRound ? "" : undefined} />
+                                ))}
+                            </span>
                         )}
-                    </div>
-                    <div>
-                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>
-                            {ocrReviewRequired ? "Review Extracted Text" : "AI Follow-up Questions"}
-                        </div>
-                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>
-                            {ocrReviewRequired
-                                ? "OCR can misread names, dates and amounts. Compare each page with the original and correct it before confirming."
-                                : "Our AI has analysed your case and identified the most important missing facts."}
-                        </div>
-                    </div>
+                    </header>
 
                     {ocrReviewRequired && (
                         <Card data-testid="ocr-review" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1608,512 +1938,361 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                         </Card>
                     )}
 
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
-                        <div>
-                            <div style={{ padding: "16px 20px", borderRadius: 16, background: `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`, border: `1px solid ${t.primary}30`, marginBottom: 16, display: "flex", alignItems: "flex-start", gap: 12 }}>
-                                <div style={{ width: 36, height: 36, borderRadius: "50%", background: t.primaryGlow, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🤖</div>
-                                <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
-                                    {clarifyLoading && clarifyRound === 0
-                                        ? "Analysing your case description…"
-                                        : clarifyDone
-                                            ? "All key facts collected. Click Complete & Continue to run AI analysis."
-                                            : clarifyRound > 0
-                                                ? `Question ${clarifyRound} of up to 4 — answer each to strengthen your case.`
-                                                : "Preparing follow-up questions…"}
-                                </div>
-                            </div>
-
-                            {/* Q1 */}
-                            {clarifyRound >= 1 && clarifyQ1 && (
-                                <Card style={{ padding: 16, marginBottom: 12, border: `1px solid ${t.primary}50` }}>
-                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
-                                        <div style={{ width: 24, height: 24, borderRadius: "50%", background: clarifyA1 ? t.success : t.primaryGlow, border: `1.5px solid ${clarifyA1 ? t.success : t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: clarifyA1 ? "#fff" : t.primary, flexShrink: 0 }}>
-                                            {clarifyA1 ? "✓" : "1"}
-                                        </div>
-                                        <div style={{ fontSize: 13, color: t.text, lineHeight: 1.5, fontWeight: 600 }}>{clarifyQ1}</div>
-                                    </div>
-                                    <textarea
-                                        placeholder="Your answer…"
-                                        value={clarifyA1}
-                                        onChange={e => setClarifyA1(e.target.value)}
-                                        disabled={clarifyRound > 1}
-                                        style={{ width: "100%", minHeight: 72, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit", opacity: clarifyRound > 1 ? 0.7 : 1 }}
-                                    />
-                                </Card>
-                            )}
-
-                            {/* Q2 */}
-                            {clarifyRound >= 2 && clarifyQ2 && (
-                                <Card style={{ padding: 16, marginBottom: 12, border: `1px solid ${t.primary}50` }}>
-                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
-                                        <div style={{ width: 24, height: 24, borderRadius: "50%", background: clarifyA2 ? t.success : t.primaryGlow, border: `1.5px solid ${clarifyA2 ? t.success : t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: clarifyA2 ? "#fff" : t.primary, flexShrink: 0 }}>
-                                            {clarifyA2 ? "✓" : "2"}
-                                        </div>
-                                        <div style={{ fontSize: 13, color: t.text, lineHeight: 1.5, fontWeight: 600 }}>{clarifyQ2}</div>
-                                    </div>
-                                    <textarea
-                                        placeholder="Your answer…"
-                                        value={clarifyA2}
-                                        onChange={e => setClarifyA2(e.target.value)}
-                                        disabled={clarifyRound > 2}
-                                        style={{ width: "100%", minHeight: 72, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit", opacity: clarifyRound > 2 ? 0.7 : 1 }}
-                                    />
-                                </Card>
-                            )}
-
-                            {/* Q3 */}
-                            {clarifyRound >= 3 && clarifyQ3 && (
-                                <Card style={{ padding: 16, marginBottom: 12, border: `1px solid ${t.primary}50` }}>
-                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
-                                        <div style={{ width: 24, height: 24, borderRadius: "50%", background: clarifyA3 ? t.success : t.primaryGlow, border: `1.5px solid ${clarifyA3 ? t.success : t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: clarifyA3 ? "#fff" : t.primary, flexShrink: 0 }}>
-                                            {clarifyA3 ? "✓" : "3"}
-                                        </div>
-                                        <div style={{ fontSize: 13, color: t.text, lineHeight: 1.5, fontWeight: 600 }}>{clarifyQ3}</div>
-                                    </div>
-                                    <textarea
-                                        placeholder="Your answer…"
-                                        value={clarifyA3}
-                                        onChange={e => setClarifyA3(e.target.value)}
-                                        disabled={clarifyRound > 3}
-                                        style={{ width: "100%", minHeight: 72, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit", opacity: clarifyRound > 3 ? 0.7 : 1 }}
-                                    />
-                                </Card>
-                            )}
-
-                            {/* Q4 */}
-                            {clarifyRound >= 4 && clarifyQ4 && (
-                                <Card style={{ padding: 16, marginBottom: 12, border: `1px solid ${t.primary}50` }}>
-                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
-                                        <div style={{ width: 24, height: 24, borderRadius: "50%", background: clarifyA4 ? t.success : t.primaryGlow, border: `1.5px solid ${clarifyA4 ? t.success : t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: clarifyA4 ? "#fff" : t.primary, flexShrink: 0 }}>
-                                            {clarifyA4 ? "✓" : "4"}
-                                        </div>
-                                        <div style={{ fontSize: 13, color: t.text, lineHeight: 1.5, fontWeight: 600 }}>{clarifyQ4}</div>
-                                    </div>
-                                    <textarea
-                                        placeholder="Your answer…"
-                                        value={clarifyA4}
-                                        onChange={e => setClarifyA4(e.target.value)}
-                                        style={{ width: "100%", minHeight: 72, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit" }}
-                                    />
-                                </Card>
-                            )}
-
-                            {/* Loading skeleton while fetching first question */}
+                    {!ocrReviewRequired && (
+                        <div className="in-thread" aria-live="polite">
                             {clarifyLoading && clarifyRound === 0 && (
-                                <Card style={{ padding: 16, marginBottom: 12 }}>
-                                    <div style={{ height: 14, width: "70%", borderRadius: 6, background: t.inputBg, marginBottom: 10 }} />
-                                    <div style={{ height: 72, borderRadius: 8, background: t.inputBg }} />
-                                </Card>
+                                <div className="in-msg ai"><span className="in-ai" aria-hidden="true">✦</span><div className="in-bub">{T("Reading your story…", "آپ کی کہانی پڑھی جا رہی ہے…")}<span className="in-typing"><i /><i /><i /></span></div></div>
                             )}
-
                             {clarifyDone && !clarifyQ1 && (
-                                <Card style={{ padding: 20, border: `1px solid ${t.success}40`, background: `${t.success}08` }}>
-                                    <div style={{ fontSize: 13, color: t.success, fontWeight: 600 }}>All critical facts already present — no additional questions needed.</div>
-                                </Card>
+                                <div className="in-msg ai"><span className="in-ai" aria-hidden="true">✦</span><div className="in-bub">{T("All critical facts are already in your story — no additional questions needed.", "تمام اہم حقائق پہلے سے موجود ہیں — مزید سوال کی ضرورت نہیں۔")}</div></div>
                             )}
-
+                            {[[clarifyQ1, clarifyA1, setClarifyA1], [clarifyQ2, clarifyA2, setClarifyA2], [clarifyQ3, clarifyA3, setClarifyA3], [clarifyQ4, clarifyA4, setClarifyA4]].map(([q, a, setA], i) => {
+                                const n = i + 1;
+                                if (!q || clarifyRound < n) return null;
+                                const current = !clarifyDone && n === clarifyRound;
+                                return (
+                                    <Fragment key={n}>
+                                        <div className="in-msg ai">
+                                            <span className="in-ai" aria-hidden="true">✦</span>
+                                            <div className="in-bub" data-now={current ? "" : undefined}>
+                                                <span className="in-qn">{T("Question", "سوال")} {n}</span>
+                                                {q}
+                                            </div>
+                                        </div>
+                                        {current || n === 4 ? (
+                                            <div className="in-answer">
+                                                <label htmlFor={`in-a${n}`} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{T("Your answer", "آپ کا جواب")}</label>
+                                                <div className="in-quick">
+                                                    {[T("I don't know", "معلوم نہیں"), T("Not sure", "یقین نہیں")].map(qa => (
+                                                        <button key={qa} type="button" className="in-chip" onClick={() => setA(qa)}>{qa}</button>
+                                                    ))}
+                                                </div>
+                                                <textarea id={`in-a${n}`} rows={2} placeholder="Your answer…" value={a}
+                                                    onChange={e => setA(e.target.value)} />
+                                            </div>
+                                        ) : a ? (
+                                            <div className="in-msg me"><div className="in-bub">{a}</div></div>
+                                        ) : null}
+                                    </Fragment>
+                                );
+                            })}
+                            {clarifyLoading && clarifyRound > 0 && (
+                                <div className="in-msg ai"><span className="in-ai" aria-hidden="true">✦</span><div className="in-bub"><span className="in-typing"><i /><i /><i /></span></div></div>
+                            )}
                         </div>
+                    )}
 
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                            {/* Question progress — driven by real clarify state */}
-                            <Card style={{ padding: 20 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                                    <div style={{ width: 34, height: 34, borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📊</div>
-                                    <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{T("Question Progress", "سوالات کی پیش رفت")}</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>AI-generated follow-up</div>
-                                    </div>
-                                </div>
-                                <div style={{ height: 6, borderRadius: 6, background: t.inputBg, overflow: "hidden", marginBottom: 6 }}>
-                                    <div style={{ height: "100%", borderRadius: 6, background: `linear-gradient(90deg, ${t.primary}, ${t.primaryHover || t.primary})`, transition: "width 0.4s ease",
-                                        width: clarifyDone ? "100%" : clarifyRound === 4 ? "75%" : clarifyRound === 3 ? "50%" : clarifyRound === 2 ? "25%" : "0%" }} />
-                                </div>
-                                <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: t.primary, fontWeight: 700, marginBottom: 16 }}>
-                                    {clarifyDone ? "All answered" :
-                                        clarifyA3 ? "3 / 4 Answered" :
-                                        clarifyA2 ? "2 / 4 Answered" :
-                                        clarifyA1 ? "1 / 4 Answered" : "0 / 4 Answered"}
-                                </div>
-                                {[
-                                    { n: clarifyQ1 || (clarifyDone ? "Not required" : "Q1 — loading…"), s: clarifyA1 ? "Done" : clarifyRound >= 1 ? "Pending" : clarifyDone ? "N/A" : "Loading" },
-                                    { n: clarifyQ2 || (clarifyDone && !clarifyQ2 ? "N/A — skipped" : "Q2 — after Q1"), s: clarifyA2 ? "Done" : clarifyRound === 2 ? "Pending" : clarifyDone ? "N/A" : "Upcoming" },
-                                    { n: clarifyQ3 || (clarifyDone && !clarifyQ3 ? "N/A — skipped" : "Q3 — after Q2"), s: clarifyA3 ? "Done" : clarifyRound === 3 ? "Pending" : clarifyDone ? "N/A" : "Upcoming" },
-                                    { n: clarifyQ4 || (clarifyDone && !clarifyQ4 ? "N/A — skipped" : "Q4 — after Q3"), s: clarifyA4 ? "Done" : clarifyRound === 4 ? "Pending" : clarifyDone ? "N/A" : "Upcoming" },
-                                ].map((item, idx) => (
-                                    <div key={idx} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: t.inputBg, border: `1px solid ${item.s === "Done" ? t.success + "40" : t.border}`, marginBottom: 6 }}>
-                                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.s === "Done" ? t.success : item.s === "Pending" ? t.warn : t.border }} />
-                                        <span style={{ fontSize: 11, color: t.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.n}</span>
-                                        <Badge type={item.s === "Done" ? "success" : item.s === "Pending" ? "warn" : "default"} style={{ fontSize: 10, padding: "2px 6px", flexShrink: 0 }}>{item.s}</Badge>
-                                    </div>
-                                ))}
-                            </Card>
-
-                            <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                                    <div style={{ width: 34, height: 34, borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📋</div>
-                                    <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{T("Case Preview", "کیس کا جائزہ")}</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>{T("Building from answers", "جوابات سے تیار ہو رہا ہے")}</div>
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Case Type</span>
-                                    <Badge type="info">{CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput}</Badge>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Your Role</span><Badge type="primary">{role}</Badge>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Province</span><span style={{ color: t.text, fontWeight: 600 }}>{PROVINCES.find(p => p.value === province)?.label || province}</span>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Urgency</span>
-                                    <Badge type={urgency === "urgent" || urgency === "high" ? "danger" : urgency === "medium" ? "warn" : "success"}>{urgency}</Badge>
-                                </div>
-                            </Card>
-                        </div>
-                    </div>
-                </div>
+                    <footer className="in-foot">
+                        <button type="button" className="in-back" onClick={() => setStep(2)}>← {T("Back", "واپس")}</button>
+                        <span className="why">{clarifyDone || ocrReviewRequired
+                            ? T("Next: the AI builds your structured case.", "اگلا: اے آئی آپ کا منظم کیس بنائے گا۔")
+                            : T("Each answer helps a lawyer understand your case.", "ہر جواب وکیل کو کیس سمجھنے میں مدد دیتا ہے۔")}</span>
+                        {!ocrReviewRequired && (clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
+                            <BtnPrimary
+                                disabled={clarifyLoading || !getCurrentAnswer().trim()}
+                                onClick={handleClarifyNext}
+                                style={{ fontSize: 14, padding: "12px 24px", borderRadius: 999 }}
+                            >
+                                {clarifyLoading ? "Thinking…" : "Next Question →"}
+                            </BtnPrimary>
+                        ) : (
+                            <BtnPrimary
+                                disabled={converting || clarifyLoading || ocrReviewLoading
+                                    || (ocrReviewRequired && !ocrReviewComplete)
+                                    || (!ocrReviewRequired && clarifyRound === 4 && !clarifyA4.trim())}
+                                onClick={handleConvertAndSummarise}
+                                style={{ fontSize: 14, padding: "12px 24px", borderRadius: 999, opacity: converting ? 0.7 : 1 }}
+                            >
+                                {converting ? "Analysing case…"
+                                    : ocrReviewLoading ? "Loading extracted text…"
+                                    : ocrReviewRequired ? "Continue analysis →"
+                                    : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
+                            </BtnPrimary>
+                        )}
+                    </footer>
+                </section>
             )}
 
-            {/* ── STEP 4: AI Case Summary ──────────────────────────────── */}
+            {/* ── STEP 4: Review (2026-10-10, approved design) ─────────── */}
             {step === 4 && (
-                <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
-                        <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
-                        <div style={{ flex: 1 }} />
-                        <BtnPrimary onClick={handleContinueToCategory} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Continue to Category →", "درجہ بندی کی طرف جائیں ←")}</BtnPrimary>
-                    </div>
-                    <div>
-                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI-Generated <em>Case Summary</em></div>
-                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Review and confirm your structured case before saving</div>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
-                        {/* Main panel */}
-                        <Card style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${t.border}`, background: t.inputBg, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                                <div>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>Structured Case Summary — AI-Generated</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
-                                        {caseId ? `Case ID: …${caseId.slice(-8)}` : "Processing…"} · Auto-generated by AI
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div style={{ padding: 20, maxHeight: 480, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
-                                {aiStructured ? (
-                                    <>
-                                        {/* AI Summary */}
-                                        <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
-                                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>📋 Case Summary</div>
-                                            <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7 }}>{aiStructured.summary}</div>
-                                        </div>
-
-                                        {/* WHAT THE ANALYSIS DID NOT SEE.
-                                            Shown beside the summary, not on the upload screen, because
-                                            this is the screen where the client decides whether to trust
-                                            the analysis. The previous wording — "some uploaded files
-                                            could not be read" — was true but unactionable: it never said
-                                            which file, or how much of it, so a bundle read down to its
-                                            cover sheet looked the same as one missing a blurred photo. */}
-                                        {(() => {
-                                            const records = Array.isArray(aiStructured.evidence_extraction) ? aiStructured.evidence_extraction : [];
-                                            if (!records.length) return null;
-                                            const nameOf = id => (evidenceFiles.find(f => f.file_id === id) || {}).filename || "an uploaded file";
-                                            const gaps = incompleteFiles(records.map(r => ({ ...r, extraction_status: r.status })));
-                                            if (!gaps.length) {
-                                                return (
-                                                    <div style={{ padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted }}>
-                                                        ✓ All {records.length} uploaded file(s) were read in full and included in this analysis.
-                                                    </div>
-                                                );
-                                            }
-                                            return (
-                                                <div data-testid="evidence-gaps" style={{ padding: "12px 14px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d", fontSize: 12, color: "#78350f" }}>
-                                                    <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                                                        ⚠ This analysis did not see all of your evidence
-                                                    </div>
-                                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                                                        {gaps.map(g => {
-                                                            const label = extractionLabel(g);
-                                                            return (
-                                                                <div key={g.file_id}>
-                                                                    <strong>{nameOf(g.file_id)}</strong> — {label.title}
-                                                                    {label.detail ? ` (${label.detail})` : ""}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                    <div style={{ marginTop: 7, lineHeight: 1.6 }}>
-                                                        Anything above was not part of the analysis. Type those details into
-                                                        your description, upload a text-based copy, or continue knowing they
-                                                        were left out.
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Applicable Laws */}
-                                        {aiStructured.applicable_laws?.length > 0 && (
-                                            <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
-                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                                                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary }}>⚖️ Applicable Laws</div>
-                                                                                                    </div>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                                    {aiStructured.applicable_laws.map((law, i) => (
-                                                        <div key={i} style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
-                                                            {i + 1}. {law}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Recommended Actions */}
-                                        {aiStructured.recommended_actions?.length > 0 && (
-                                            <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
-                                                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>🎯 Recommended Actions</div>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                                    {aiStructured.recommended_actions.map((action, i) => (
-                                                        <div key={i} style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
-                                                            {i + 1}. {action}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                {/* The backend now says whether these actions were actually
-                                                    checked against retrieved law. "grounded" is the only
-                                                    status that means they were; everything else means the
-                                                    check could not run, and that must be visible here rather
-                                                    than buried in the summary paragraph. */}
-                                                {aiStructured.grounding_status && aiStructured.grounding_status !== "grounded" && (
-                                                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${t.border}`, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                                                        <span style={{ fontSize: 13, lineHeight: 1.5 }}>⚠️</span>
-                                                        <span style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55 }}>
-                                                            {GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* Risk Level */}
-                                        {aiStructured.risk_level && (
-                                            <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
-                                                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>⚠️ Risk Assessment</div>
-                                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                                    <Badge type={RISK_COLORS[aiStructured.risk_level] || "warn"} style={{ fontSize: 12, padding: "6px 14px", fontWeight: 700, textTransform: "uppercase" }}>
-                                                        {aiStructured.risk_level} risk
-                                                    </Badge>
-                                                    <span style={{ fontSize: 12, color: t.textMuted }}>Informational only — not legal advice.</span>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    // Static fallback when AI analysis not available
-                                    // `body` carries JSX, not an HTML string. It used to be a
-                                    // template literal rendered through dangerouslySetInnerHTML,
-                                    // which meant the "Case Description" card — raw text the user
-                                    // typed — was parsed as markup. Only the "Parties" card ever
-                                    // needed real elements, so it supplies them directly and React
-                                    // escapes everything else.
-                                    [
-                                        {
-                                            icon: "👤", title: "Parties", c: t.primary,
-                                            body: (
-                                                <>
-                                                    <strong>Role:</strong> {role}<br />
-                                                    <strong>Province:</strong> {PROVINCES.find(p => p.value === province)?.label || province}
-                                                </>
-                                            ),
-                                        },
-                                        { icon: "⚖️", title: "Case Type", body: `${CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput} — Urgency: ${urgency}`, c: t.primary },
-                                        { icon: "📋", title: "Case Description", body: description || voiceTranscript || "No description provided.", c: t.primary },
-                                        { icon: "🎯", title: "Desired Outcome", body: "Legal assistance and representation.", c: t.primary },
-                                    ].map((s, idx) => (
-                                        <div key={idx} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
-                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                                                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: s.c }}>{s.icon} {s.title}</div>
-                                            </div>
-                                            <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{s.body}</div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </Card>
-
-                        {/* Sidebar */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                            <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                                    <div style={{ width: 34, height: 34, borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📊</div>
-                                    <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Case Overview</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>Confirm details</div>
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Case ID</span>
-                                    <span style={{ fontFamily: "'JetBrains Mono',monospace", color: t.text, fontWeight: 600, fontSize: 11 }}>
-                                        {caseId ? `…${caseId.slice(-8)}` : "Pending"}
-                                    </span>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Type</span>
-                                    <Badge type="info">{CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput}</Badge>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Role</span><Badge type="primary">{role}</Badge>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Province</span>
-                                    <span style={{ color: t.text, fontWeight: 600 }}>{PROVINCES.find(p => p.value === province)?.label || province}</span>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: 12 }}>
-                                    <span style={{ color: t.textMuted }}>Urgency</span>
-                                    <Badge type={urgency === "urgent" || urgency === "high" ? "danger" : urgency === "medium" ? "warn" : "success"}>{urgency}</Badge>
-                                </div>
-                            </Card>
-
-                            <Card style={{ padding: 20 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                                    <div style={{ width: 34, height: 34, borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🔍</div>
-                                    <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Applicable Laws</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>AI-identified statutes</div>
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                    {aiStructured?.applicable_laws?.length > 0
-                                        ? aiStructured.applicable_laws.slice(0, 4).map((law, i) => (
-                                            <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                                                <div style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>{law}</div>
-                                            </div>
-                                        ))
-                                        : [
-                                            { t: "Relevant Pakistani Statute", d: "AI analysis pending or unavailable" },
-                                        ].map(lw => (
-                                            <div key={lw.t} style={{ padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                                                <div style={{ fontSize: 12, fontWeight: 700, color: t.primary, marginBottom: 2 }}>{lw.t}</div>
-                                                <div style={{ fontSize: 11, color: t.textMuted }}>{lw.d}</div>
-                                            </div>
-                                        ))
-                                    }
-                                </div>
-                            </Card>
+                <section className="in-card">
+                    <header className="in-card-head">
+                        <span className="in-card-ic" aria-hidden="true"><Ic n="file" s={19} c="currentColor" /></span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <h2 className="in-card-title">{T("Here is your case, structured", "یہ رہا آپ کا منظم کیس")}</h2>
+                            <div className="in-card-sub">{T("Read it like a lawyer would. Fix anything wrong before you confirm.", "اسے وکیل کی طرح پڑھیں۔ تصدیق سے پہلے کوئی غلطی درست کریں۔")}{caseId ? ` · ${T("Case", "کیس")} …${caseId.slice(-8)}` : ""}</div>
                         </div>
-                    </div>
-                </div>
-            )}
+                        <button type="button" className="in-ghost" onClick={handleDownloadPDF}>
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                            {T("Export", "ایکسپورٹ")}
+                        </button>
+                    </header>
 
-            {/* ── STEP 5: Categorization + Final Submit ────────────────── */}
-            {step === 5 && (
-                <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
-                        <BtnOutline onClick={() => setStep(4)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
-                        <div style={{ flex: 1 }} />
-                        <BtnPrimary
-                            disabled={intakeSubmitting}
-                            onClick={() => { if (!intakeSubmitting) handleSubmit(); }}
-                            style={{ fontSize: 13, padding: "8px 18px", opacity: intakeSubmitting ? 0.7 : 1 }}>
-                            {intakeSubmitting ? "Confirming…" : "Confirm Category & Open Case →"}
-                        </BtnPrimary>
-                    </div>
-                    <div>
-                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>Case <em>Categorization</em></div>
-                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Confirm your case category before final submission</div>
+                    <div className="in-facts">
+                        {[[T("Role", "کردار"), roleName], [T("Province", "صوبہ"), PROVINCE_SHORT[province] || province], [T("Case type", "کیس کی قسم"), caseTypeName], [T("Urgency", "فوریت"), urgency ? urgency.charAt(0).toUpperCase() + urgency.slice(1) : ""]].map(([k, v]) => (
+                            <div key={k}><small>{k}</small><b data-u={k === T("Urgency", "فوریت") ? urgency : undefined}>{v || "—"}</b></div>
+                        ))}
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
-                        <div>
-                            <div style={{ padding: "16px 20px", borderRadius: 16, background: `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`, border: `1px solid ${t.primary}30`, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-                                <div style={{ fontSize: 18 }}>🤖</div>
-                                <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
-                                    {caseTypeInput
-                                        ? <>AI classified your case as <strong style={{ color: t.primary }}>{CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput}</strong>. Confirm or change below.</>
-                                        : <>Select the category that best describes your legal issue.</>
-                                    }
+                    <div className="in-sections">
+        {aiStructured ? (
+                            <>
+                                {/* AI Summary */}
+                                <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>📋 Case Summary</div>
+                                    <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7 }}>{aiStructured.summary}</div>
                                 </div>
-                            </div>
 
-                            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
-                                {[
-                                    { id: "civil",          i: "⚖️",  n: "Civil Law",          d: "Property disputes, contracts, personal injury" },
-                                    { id: "criminal",       i: "🚔",  n: "Criminal Law",        d: "FIR filing, bail applications, criminal defense" },
-                                    { id: "family",         i: "👨‍👩‍👧",  n: "Family Law",          d: "Divorce, custody, inheritance, guardianship" },
-                                    { id: "constitutional", i: "📜",  n: "Constitutional Law",  d: "Fundamental rights, writ petitions" },
-                                ].map(c => {
-                                    const sel = c.id === caseTypeInput;
+                                {/* WHAT THE ANALYSIS DID NOT SEE.
+                                    Shown beside the summary, not on the upload screen, because
+                                    this is the screen where the client decides whether to trust
+                                    the analysis. The previous wording — "some uploaded files
+                                    could not be read" — was true but unactionable: it never said
+                                    which file, or how much of it, so a bundle read down to its
+                                    cover sheet looked the same as one missing a blurred photo. */}
+                                {(() => {
+                                    const records = Array.isArray(aiStructured.evidence_extraction) ? aiStructured.evidence_extraction : [];
+                                    if (!records.length) return null;
+                                    const nameOf = id => (evidenceFiles.find(f => f.file_id === id) || {}).filename || "an uploaded file";
+                                    const gaps = incompleteFiles(records.map(r => ({ ...r, extraction_status: r.status })));
+                                    if (!gaps.length) {
+                                        return (
+                                            <div style={{ padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted }}>
+                                                ✓ All {records.length} uploaded file(s) were read in full and included in this analysis.
+                                            </div>
+                                        );
+                                    }
                                     return (
-                                        <Card key={c.id} onClick={() => setCaseTypeInput(c.id)} style={{ padding: "20px 16px", textAlign: "center", cursor: "pointer", border: sel ? `1.5px solid ${t.primary}` : `1.5px solid ${t.border}`, background: sel ? `linear-gradient(135deg, ${t.primary}15, ${t.primaryGlow})` : t.card, boxShadow: sel ? `0 0 20px ${t.primary}30` : t.shadowCard }}>
-                                            {sel && <div style={{ position: "absolute", top: 12, right: 12, width: 22, height: 22, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#071a1a", fontWeight: 700 }}>✓</div>}
-                                            <div style={{ fontSize: 26, marginBottom: 12 }}>{c.i}</div>
-                                            <div style={{ fontSize: 14, fontWeight: 700, color: sel ? t.primary : t.text, marginBottom: 4 }}>{c.n}</div>
-                                            <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.5 }}>{c.d}</div>
-                                        </Card>
+                                        <div data-testid="evidence-gaps" style={{ padding: "12px 14px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d", fontSize: 12, color: "#78350f" }}>
+                                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                                                ⚠ This analysis did not see all of your evidence
+                                            </div>
+                                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                {gaps.map(g => {
+                                                    const label = extractionLabel(g);
+                                                    return (
+                                                        <div key={g.file_id}>
+                                                            <strong>{nameOf(g.file_id)}</strong> — {label.title}
+                                                            {label.detail ? ` (${label.detail})` : ""}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div style={{ marginTop: 7, lineHeight: 1.6 }}>
+                                                Anything above was not part of the analysis. Type those details into
+                                                your description, upload a text-based copy, or continue knowing they
+                                                were left out.
+                                            </div>
+                                        </div>
                                     );
-                                })}
-                            </div>
-                        </div>
+                                })()}
 
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                            <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow, textAlign: "center" }}>
-                                <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T(caseConfirmed ? "Case Intake Complete" : "Ready to Confirm", "کیس کی تصدیق")}</div>
-                                {/* "ready for review" implies somebody is about to review it. Nothing
-     is: conversion creates an open case and stops. The next move is the
-     client's, and saying so is the difference between them choosing a
-     lawyer today and waiting for a call that was never scheduled. */}
-                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>
-                                    {caseConfirmed
-                                        ? T("Your case is open. Choose a lawyer to send it to — it has not been sent to anyone yet.", "آپ کا کیس کھل چکا ہے۔ اسے بھیجنے کے لیے وکیل منتخب کریں — ابھی یہ کسی کو نہیں بھیجا گیا۔")
-                                        : T("Review the category, then confirm it to open your case. Until confirmation succeeds, this remains a draft and cannot be matched or sent.", "درجہ بندی کا جائزہ لیں، پھر کیس کھولنے کے لیے اس کی تصدیق کریں۔ کامیاب تصدیق تک یہ مسودہ رہے گا اور اسے میچ یا بھیجا نہیں جا سکتا۔")}
-                                </div>
-                                <div style={{ textAlign: "left" }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>Case ID</span>
-                                        <span style={{ fontFamily: "'JetBrains Mono',monospace", color: t.text, fontWeight: 600, fontSize: 11 }}>
-                                            {caseId ? `…${caseId.slice(-8)}` : "Pending"}
-                                        </span>
+                                {/* Applicable Laws */}
+                                {aiStructured.applicable_laws?.length > 0 && (
+                                    <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary }}>⚖️ Applicable Laws</div>
+                                                                                            </div>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                            {aiStructured.applicable_laws.map((law, i) => (
+                                                <div key={i} style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
+                                                    {i + 1}. {law}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>Category</span><Badge type="info">{CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput}</Badge>
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>Province</span>
-                                        <span style={{ color: t.text, fontWeight: 600 }}>{PROVINCES.find(p => p.value === province)?.label || province}</span>
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>Status</span><Badge type={caseConfirmed ? "success" : "warn"}>{caseConfirmed ? "Open" : "Draft"}</Badge>
-                                    </div>
-                                </div>
-                                <BtnPrimary
-                                    disabled={!caseConfirmed}
-                                    onClick={() => {
-                                        if (!caseConfirmed) return;
-                                        const dest = caseId ? `/lawyers?case_id=${caseId}` : "/lawyers";
-                                        router.push(dest);
-                                    }}
-                                    style={{ width: "100%", marginTop: 20, padding: 14, fontSize: 14, opacity: caseConfirmed ? 1 : 0.55 }}
-                                >{T("Find a Lawyer →", "وکیل تلاش کریں ←")}</BtnPrimary>
-                            </Card>
+                                )}
 
-                            <Card style={{ padding: 20 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                                    <div style={{ width: 34, height: 34, borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📄</div>
-                                    <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{T("Export Case", "کیس ایکسپورٹ کریں")}</div>
+                                {/* Recommended Actions */}
+                                {aiStructured.recommended_actions?.length > 0 && (
+                                    <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>🎯 Recommended Actions</div>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                            {aiStructured.recommended_actions.map((action, i) => (
+                                                <div key={i} style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
+                                                    {i + 1}. {action}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {/* The backend now says whether these actions were actually
+                                            checked against retrieved law. "grounded" is the only
+                                            status that means they were; everything else means the
+                                            check could not run, and that must be visible here rather
+                                            than buried in the summary paragraph. */}
+                                        {aiStructured.grounding_status && aiStructured.grounding_status !== "grounded" && (
+                                            <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${t.border}`, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                                                <span style={{ fontSize: 13, lineHeight: 1.5 }}>⚠️</span>
+                                                <span style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55 }}>
+                                                    {GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Risk Level */}
+                                {aiStructured.risk_level && (
+                                    <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>⚠️ Risk Assessment</div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                            <Badge type={RISK_COLORS[aiStructured.risk_level] || "warn"} style={{ fontSize: 12, padding: "6px 14px", fontWeight: 700, textTransform: "uppercase" }}>
+                                                {aiStructured.risk_level} risk
+                                            </Badge>
+                                            <span style={{ fontSize: 12, color: t.textMuted }}>Informational only — not legal advice.</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            // Static fallback when AI analysis not available
+                            // `body` carries JSX, not an HTML string. It used to be a
+                            // template literal rendered through dangerouslySetInnerHTML,
+                            // which meant the "Case Description" card — raw text the user
+                            // typed — was parsed as markup. Only the "Parties" card ever
+                            // needed real elements, so it supplies them directly and React
+                            // escapes everything else.
+                            [
+                                {
+                                    icon: "👤", title: "Parties", c: t.primary,
+                                    body: (
+                                        <>
+                                            <strong>Role:</strong> {role}<br />
+                                            <strong>Province:</strong> {PROVINCES.find(p => p.value === province)?.label || province}
+                                        </>
+                                    ),
+                                },
+                                { icon: "⚖️", title: "Case Type", body: `${CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput} — Urgency: ${urgency}`, c: t.primary },
+                                { icon: "📋", title: "Case Description", body: description || voiceTranscript || "No description provided.", c: t.primary },
+                                { icon: "🎯", title: "Desired Outcome", body: "Legal assistance and representation.", c: t.primary },
+                            ].map((s, idx) => (
+                                <div key={idx} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: s.c }}>{s.icon} {s.title}</div>
+                                    </div>
+                                    <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{s.body}</div>
                                 </div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                    <BtnOutline onClick={handleDownloadPDF} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>📄 Download Case PDF</BtnOutline>
-                                    <BtnOutline onClick={handleEmail} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>✉️ Email Summary</BtnOutline>
-                                    <BtnOutline onClick={handlePrint} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>🖨️ Print</BtnOutline>
-                                </div>
-                            </Card>
-                        </div>
+                            ))
+                        )}
                     </div>
-                </div>
+
+                    <footer className="in-foot">
+                        <button type="button" className="in-back" onClick={() => setStep(3)}>← {T("Back", "واپس")}</button>
+                        <span className="why">{T("Looks right? Next you confirm the category.", "درست ہے؟ اگلا: زمرے کی تصدیق۔")}</span>
+                        <button type="button" className="in-next" onClick={handleContinueToCategory}>
+                            {T("Continue to Category →", "درجہ بندی کی طرف جائیں ←")}
+                        </button>
+                    </footer>
+                </section>
             )}
+
+            {/* ── STEP 5: Confirm (2026-10-10, approved design) ───────── */}
+            {step === 5 && (
+                <section className="in-card">
+                    <header className="in-card-head">
+                        <span className="in-card-ic" aria-hidden="true"><Ic n="check" s={19} c="currentColor" /></span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <h2 className="in-card-title">{T("Confirm the category", "زمرے کی تصدیق کریں")}</h2>
+                            <div className="in-card-sub">{caseTypeInput
+                                ? <>{T("The AI placed your case under", "اے آئی نے آپ کا کیس اس میں رکھا:")} <b style={{ color: "var(--brand-text)" }}>{caseTypeName}</b>. {T("Change it if it is wrong — lawyers are matched on it.", "غلط ہو تو بدلیں — وکیل اسی پر منتخب ہوتے ہیں۔")}</>
+                                : T("Select the category that best describes your legal issue.", "وہ زمرہ منتخب کریں جو آپ کے مسئلے کو بہتر بیان کرے۔")}</div>
+                        </div>
+                    </header>
+
+                    <div className="in-cats" role="radiogroup" aria-label={T("Category", "زمرہ")}>
+                        {[
+                            { id: "civil", n: T("Civil", "دیوانی"), d: T("Property, money, contracts", "جائیداد، رقم، معاہدے") },
+                            { id: "criminal", n: T("Criminal", "فوجداری"), d: T("FIR, bail, criminal defence", "ایف آئی آر، ضمانت، دفاع") },
+                            { id: "family", n: T("Family", "عائلی"), d: T("Divorce, khula, custody, maintenance", "طلاق، خلع، حضانت، نان نفقہ") },
+                            { id: "constitutional", n: T("Constitutional", "آئینی"), d: T("Fundamental rights, writ petitions", "بنیادی حقوق، رٹ") },
+                        ].map(c => (
+                            <button key={c.id} type="button" role="radio" aria-checked={c.id === caseTypeInput} className="in-cat"
+                                disabled={caseConfirmed} onClick={() => setCaseTypeInput(c.id)}>
+                                <small>{c.id === convertedCaseType ? T("AI suggested", "اے آئی کی تجویز") : "\u00a0"}</small>
+                                <b>{c.n}</b>
+                                <span>{c.d}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    {!caseConfirmed ? (
+                        <div className="in-open">
+                            <span className="in-open-ic" aria-hidden="true"><Ic n="check" s={22} c="currentColor" /></span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <b>{T("Open my case", "میرا کیس کھولیں")}</b>
+                                <span>{T("Until you confirm, this stays a draft: it cannot be matched or sent. Once open, it is still private — not sent to anyone until you choose a lawyer.", "تصدیق تک یہ مسودہ ہے۔ کھلنے کے بعد بھی نجی ہے — وکیل چننے تک کسی کو نہیں بھیجا جاتا۔")}</span>
+                            </div>
+                            <button type="button" className="in-next" disabled={intakeSubmitting}
+                                onClick={() => { if (!intakeSubmitting) handleSubmit(); }}>
+                                {intakeSubmitting ? "Confirming…" : "Confirm Category & Open Case →"}
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="in-done">
+                            <span className="in-done-ic" aria-hidden="true"><Ic n="check" s={28} c="currentColor" /></span>
+                            <h3>{T("Case Intake Complete", "کیس کی درخواست مکمل")}</h3>
+                            <p>{T("Your case is open. Choose a lawyer to send it to — it has not been sent to anyone yet.", "آپ کا کیس کھل چکا ہے۔ اسے بھیجنے کے لیے وکیل منتخب کریں — ابھی کسی کو نہیں بھیجا گیا۔")}{caseId ? ` ${T("Case", "کیس")} …${caseId.slice(-8)}.` : ""}</p>
+                        </div>
+                    )}
+
+                    <div className="in-label" style={{ marginTop: 22 }}>{T("What you can do next", "آگے کیا کر سکتے ہیں")}</div>
+                    <div className="in-nexts">
+                        <button type="button" className="in-nx" data-main="" disabled={!caseConfirmed}
+                            onClick={() => { if (!caseConfirmed) return; router.push(caseId ? `/lawyers?case_id=${caseId}` : "/lawyers"); }}>
+                            <span className="ic" aria-hidden="true"><svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg></span>
+                            <b>{T("Find a Lawyer →", "وکیل تلاش کریں ←")}</b>
+                            <span>{T("AI match for this case, then choose who to send it to.", "اس کیس کے لیے اے آئی میچ، پھر خود چنیں۔")}</span>
+                        </button>
+                        <button type="button" className="in-nx" style={{ "--c": "#6aa8ff" }} disabled={!caseConfirmed} onClick={() => router.push("/documents")}>
+                            <span className="ic" aria-hidden="true"><svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg></span>
+                            <b>{T("Draft a document", "دستاویز تیار کریں")}</b>
+                            <span>{T("e.g. a legal notice.", "مثلاً قانونی نوٹس۔")}</span>
+                        </button>
+                        <button type="button" className="in-nx" style={{ "--c": "var(--gold)" }} disabled={!caseConfirmed} onClick={() => router.push("/tracking")}>
+                            <span className="ic" aria-hidden="true"><svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></span>
+                            <b>{T("Track the case", "کیس دیکھیں")}</b>
+                            <span>{T("See its status and updates.", "حیثیت اور اپ ڈیٹس۔")}</span>
+                        </button>
+                    </div>
+
+                    <footer className="in-foot">
+                        {!caseConfirmed && <button type="button" className="in-back" onClick={() => setStep(4)}>← {T("Back", "واپس")}</button>}
+                        <span className="why">{T("Export Case", "کیس ایکسپورٹ کریں")}:</span>
+                        <button type="button" className="in-ghost" onClick={handleDownloadPDF}>Download Case PDF</button>
+                        <button type="button" className="in-ghost" onClick={handleEmail}>Email Summary</button>
+                        <button type="button" className="in-ghost" onClick={handlePrint}>Print</button>
+                    </footer>
+                </section>
+            )}
+            </div>
+
+            {(
+                <aside id="in-case-file" className="in-file" data-open={fileOpen ? "" : undefined} aria-hidden={!fileOpen}
+                    aria-label={T("Your case file", "آپ کی کیس فائل")}
+                    onKeyDown={e => { if (e.key === "Escape") setFileOpen(false); }}>
+                    <div className="in-file-head">
+                        <span className="in-file-ic" aria-hidden="true">
+                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
+                        </span>
+                        <div>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>{T("Your case file", "آپ کی کیس فائل")}</div>
+                            <div style={{ fontSize: 12, color: "var(--faint)" }}>{T("Fills in as you go", "جیسے جیسے آپ آگے بڑھیں")}</div>
+                        </div>
+                        <button type="button" className="in-file-x" aria-label={T("Close case file", "کیس فائل بند کریں")} tabIndex={fileOpen ? 0 : -1} onClick={() => setFileOpen(false)}>
+                            <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                        </button>
+                    </div>
+                    {caseFileRows.map(([label, value, fresh]) => (
+                        <div key={label} className="in-file-row">
+                            <span>{label}</span>
+                            {value ? <b data-new={fresh ? "" : undefined}>{value}</b> : <i>—</i>}
+                        </div>
+                    ))}
+                    <div className="in-file-note">
+                        <b>{T("Private draft.", "نجی مسودہ۔")}</b> {T("Nothing is sent to any lawyer until you choose one at the end.", "آخر میں آپ کے انتخاب تک کسی وکیل کو کچھ نہیں بھیجا جاتا۔")}
+                    </div>
+                </aside>
+            )}
+            </div>
         </div>
     );
 };

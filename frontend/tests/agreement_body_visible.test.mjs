@@ -200,7 +200,7 @@ test("client: opening an agreement shows its text, fetched by id", async () => {
     __respond("getAgreement", () => ok(fullDoc()));
 
     const ui = await mount(clientScreen());
-    await ui.clickText("All Agreements");
+    await ui.clickText("See all");
     await ui.openRow("Retainer");
 
     assert.ok(ui.text().includes(BODY), "the agreement text is not on screen");
@@ -247,7 +247,7 @@ test("client: a failed fetch shows an error and no way to sign", async () => {
         data: null, error: { message: "Network error" }, status: 0 }));
 
     const ui = await mount(clientScreen());
-    await ui.clickText("All Agreements");
+    await ui.clickText("See all");
     await ui.openRow("Retainer");
 
     assert.match(ui.text(), /could not be loaded|network error/i);
@@ -411,7 +411,7 @@ test("client: the 51st agreement is reachable and the count is honest", async ()
     __respond("getAgreement", () => ok(fullDoc()));
 
     const ui = await mount(clientScreen());
-    await ui.clickText("All Agreements");
+    await ui.clickText("See all");
 
     assert.match(ui.text(), /of 51/,
         "the screen does not say how many agreements exist");
@@ -471,7 +471,7 @@ test("client: a late fetch for A does not overwrite the open B", async () => {
     }));
 
     const ui = await mount(clientScreen());
-    await ui.clickText("All Agreements");
+    await ui.clickText("See all");
     await ui.openRow("Agreement A");
     await ui.openRow("Agreement B");
     assert.equal(pending.length, 2);

@@ -1549,8 +1549,8 @@ const ModDocuments = () => {
                                 is always shown next to the verified one. */}
                             {genDone && verification && (
                                 <div style={{ padding: 14, borderRadius: 12,
-                                    background: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}12` : `${t.textMuted}0e`,
-                                    border: `1.5px solid ${(verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}55` : `${t.textMuted}33`}` }}>
+                                    background: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}12` : `color-mix(in srgb, ${t.textMuted} 5%, transparent)`,
+                                    border: `1.5px solid ${(verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}55` : `color-mix(in srgb, ${t.textMuted} 20%, transparent)`}` }}>
                                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6,
                                         color: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? t.danger : t.text }}>
                                         {verification.ran === false
@@ -1576,7 +1576,7 @@ const ModDocuments = () => {
                                                 .filter(c => c.status !== "VERIFIED")
                                                 .map((c, i) => (
                                                     <div key={`${c.canonical}-${i}`} style={{ marginBottom: 8, paddingLeft: 10,
-                                                        borderLeft: `2px solid ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? `${t.danger}66` : `${t.textMuted}44`}` }}>
+                                                        borderLeft: `2px solid ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? `${t.danger}66` : `color-mix(in srgb, ${t.textMuted} 27%, transparent)`}` }}>
                                                         <div style={{ fontSize: 12, fontWeight: 600, color: (c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? t.danger : t.text }}>
                                                             {c.canonical}
                                                             <span style={{ fontWeight: 500, color: t.textMuted }}>
@@ -1594,7 +1594,7 @@ const ModDocuments = () => {
                                     </div>
                                     {/* The adopted scope statement, shipped from the backend. */}
                                     {verification.scope && (
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${t.textMuted}22`, lineHeight: 1.5 }}>
+                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 8, paddingTop: 8, borderTop: `1px solid color-mix(in srgb, ${t.textMuted} 13%, transparent)`, lineHeight: 1.5 }}>
                                             {verification.scope}
                                         </div>
                                     )}

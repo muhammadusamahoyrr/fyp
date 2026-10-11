@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";
+import { clientThemeOnTokens } from "./clientTheme.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
 import { confirmedCases, caseStatusLabel } from "@/lib/caseStatus.js";
@@ -2767,7 +2768,7 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
 // Fix #5: reads appointmentMilestones from CaseContext so booked appointments
 //         appear on the timeline immediately.
 export default function Module7({ isDark }) {
-    const t = isDark ? DARK : LIGHT;
+    const t = clientThemeOnTokens(isDark ? DARK : LIGHT);
     const isMobile = useIsMobile();
     const { notifications, markNotificationDone, markAllNotificationsDone, appointmentMilestones } = useCase();
     const [page, setPage] = useState("overview");

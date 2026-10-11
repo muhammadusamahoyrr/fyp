@@ -29,7 +29,7 @@ function define(name, value) {
 }
 for (const name of ["window", "document", "navigator", "HTMLElement", "Element",
                     "Node", "Event", "CustomEvent", "MouseEvent", "MutationObserver",
-                    "getComputedStyle", "FileReader"]) {
+                    "getComputedStyle", "FileReader", "DOMParser"]) {
     define(name, dom.window[name]);
 }
 // jsdom only provides these with pretendToBeVisual, so copying them from the
@@ -64,8 +64,10 @@ dom.window.HTMLCanvasElement.prototype.toDataURL = () => "data:image/png;base64,
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { __respond, __reset } = await import("./support/api-stub.mjs");
+const { __respond, __reset, __calls } = await import("./support/api-stub.mjs");
 const ModAgreements = (await import("../src/components/client/ModAgreements.jsx")).default;
+// Page navigation is the client sidebar's since 2026-10-11 (lib/agreementsNav.js).
+const agreementsNav = await import("../src/lib/agreementsNav.js");
 const { AuthProvider } = await import("../src/context/AuthContext.jsx");
 
 const { createElement: h } = React;
@@ -97,6 +99,34 @@ async function mount() {
     const api = {
         host,
         text: () => host.textContent,
+        /* The builder is opened from the client sidebar's "Agreements > Create",
+           which asks the module through lib/agreementsNav.js. */
+        /* The drafting bar's buttons are icons; each is named by its title. */
+        async clickTitle(title) {
+            const el = host.querySelector(`button[title="${title}"]`);
+            assert.ok(el, `no button titled ${JSON.stringify(title)}`);
+            await act(async () => {
+                el.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+            });
+            await act(async () => {});
+        },
+        async openPage(view) {
+            await act(async () => { agreementsNav.requestAgreementsView(view); });
+            await act(async () => {});
+        },
+        /* Opens the builder and writes a line into the rich editor, because
+           the first step will not move on without words. */
+        async openCreate(html = "<p>Fees are 40% of recovery.</p>") {
+            await act(async () => { agreementsNav.requestAgreementsView("create"); });
+            await act(async () => {});
+            const paper = host.querySelector("[data-ag-paper]");
+            if (paper && html) {
+                await act(async () => {
+                    paper.innerHTML = html;
+                    paper.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+                });
+            }
+        },
         async clickText(label) {
             const all = [...host.querySelectorAll("button,div,span,a")].reverse();
             // Exact first, then endsWith, then a substring match restricted to
@@ -132,22 +162,22 @@ test("the Create step renders without throwing", async () => {
     // `sendError is not defined` was a ReferenceError thrown from this render.
     // The build was clean and 961 tests were green, because nothing mounted it.
     const ui = await mount();
-    await ui.clickText("Create");
+    await ui.openCreate();
     assert.ok(ui.text().includes("Edit Agreement"),
               "the builder's first step did not render");
 });
 
 test("every step of the wizard paints", async () => {
     const ui = await mount();
-    await ui.clickText("Create");
+    await ui.openCreate();
 
     // Step 1 -> 2. The title defaults, so Next is allowed.
-    await ui.clickText("Next →");
+    await ui.clickText("Next");
     assert.ok(ui.text().includes("Signers"), "the Add Signers step did not render");
 
     // A signer is required before the signature step.
     await ui.clickText("+ Add");
-    await ui.clickText("Next →");
+    await ui.clickText("Next");
     assert.ok(ui.text().includes("Your Signature") || ui.text().includes("Draw"),
               "the signature step did not render");
 });
@@ -156,10 +186,10 @@ test("the review step renders, which is where the send button lives", async () =
     // This is the exact screen that threw: it reads `sendError`, `sentLinks`
     // and `submitting`, all of which a refactor had deleted.
     const ui = await mount();
-    await ui.clickText("Create");
-    await ui.clickText("Next →");
+    await ui.openCreate();
+    await ui.clickText("Next");
     await ui.clickText("+ Add");
-    await ui.clickText("Next →");
+    await ui.clickText("Next");
 
     // Type mode gives a signature without needing a real canvas.
     await ui.clickText("Type");
@@ -173,7 +203,7 @@ test("the review step renders, which is where the send button lives", async () =
         input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
 
-    await ui.clickText("Next →");
+    await ui.clickText("Next");
     assert.ok(ui.text().includes("Signing Order"),
               "the review step did not render");
     assert.ok(ui.text().includes("Sign & Send"),
@@ -182,10 +212,10 @@ test("the review step renders, which is where the send button lives", async () =
 
 test("the signature pad offers all three methods inside the builder", async () => {
     const ui = await mount();
-    await ui.clickText("Create");
-    await ui.clickText("Next →");
+    await ui.openCreate();
+    await ui.clickText("Next");
     await ui.clickText("+ Add");
-    await ui.clickText("Next →");
+    await ui.clickText("Next");
 
     const text = ui.text();
     for (const mode of ["Draw", "Type", "Upload"]) {
@@ -221,7 +251,7 @@ const row = (over = {}) => ({
 test("the list renders every column header", async () => {
     listWith([row()]);
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
 
     for (const h of ["DOCUMENT", "PARTIES", "STATUS", "PROGRESS", "ACTIONS"]) {
         assert.ok(ui.text().includes(h), `the ${h} column header is missing`);
@@ -231,7 +261,7 @@ test("the list renders every column header", async () => {
 test("a row shows its title, progress and party labels", async () => {
     listWith([row()]);
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
 
     const text = ui.text();
     assert.ok(text.includes("NDA"), "the document title is missing");
@@ -243,7 +273,7 @@ test("a row shows its title, progress and party labels", async () => {
               "a three-party agreement must not be shown as one recipient");
 });
 
-test("an agreement waiting on you reads as Needs Attention", async () => {
+test("an agreement waiting on you reads as Needs you", async () => {
     // Derived from needsMySig, not a stored status: pending AND unsigned by me.
     listWith([row({
         parties: [
@@ -253,14 +283,14 @@ test("an agreement waiting on you reads as Needs Attention", async () => {
         signed_count: 1, total_parties: 2,
     })]);
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
 
-    assert.ok(ui.text().includes("Needs Attention"),
+    assert.ok(ui.text().includes("Needs you"),
               "an agreement awaiting my signature should say so");
     assert.ok(ui.text().includes("Sign"), "it should offer the sign action");
 });
 
-test("an executed agreement is not marked as needing attention", async () => {
+test("an executed agreement is not marked as needing you", async () => {
     listWith([row({
         status: "executed", signed_count: 2, total_parties: 2,
         parties: [
@@ -269,10 +299,10 @@ test("an executed agreement is not marked as needing attention", async () => {
         ],
     })]);
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
 
     assert.ok(ui.text().includes("Signed"));
-    assert.ok(!ui.text().includes("Needs Attention"));
+    assert.ok(!ui.text().includes("Needs you"));
     assert.ok(ui.text().includes("2/2"));
 });
 
@@ -282,7 +312,7 @@ test("the total is stated, so a full page does not look like the whole list", as
         error: null, status: 200,
     }));
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
 
     assert.ok(/Showing 1 of 25/.test(ui.text()),
               "the row count must name the total, not just what is loaded");
@@ -293,7 +323,7 @@ test("the total is stated, so a full page does not look like the whole list", as
 test("the menu opens and offers open + remove", async () => {
     listWith([row()]);
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
 
     assert.ok(!ui.text().includes("Remove from my list"),
               "the menu should start closed");
@@ -310,7 +340,7 @@ test("it says Remove from my list, never Delete", async () => {
     // The wording has to match what actually happens.
     listWith([row()]);
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
     await ui.clickText("⋮");
 
     const text = ui.text();
@@ -324,7 +354,7 @@ test("Download PDF is offered only once the agreement is executed", async () => 
     // earlier would be an action that always fails.
     listWith([row()]);                       // pending
     let ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
     await ui.clickText("⋮");
     assert.ok(!ui.text().includes("Download PDF"),
               "a pending agreement must not offer a download");
@@ -332,7 +362,7 @@ test("Download PDF is offered only once the agreement is executed", async () => 
     __reset(); signedIn();
     listWith([row({ status: "executed", signed_count: 2, total_parties: 2 })]);
     ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
     await ui.clickText("⋮");
     assert.ok(ui.text().includes("Download PDF"),
               "an executed agreement should offer its PDF");
@@ -344,9 +374,9 @@ test("removing calls archive, not any delete endpoint", async () => {
     __respond("archiveAgreement", (id) => { archived = id; return ok(fullRow()); });
 
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
     await ui.clickText("⋮");
-    await ui.clickText("🗑️  Remove from my list");
+    await ui.clickText("Remove from my list");
 
     assert.equal(archived, "A1", "the archive endpoint was not called");
 });
@@ -359,7 +389,7 @@ test("the Archived view asks the server for archived rows", async () => {
                  error: null, status: 200 };
     });
     const ui = await mount();
-    await ui.clickText("All Agreements");
+    await ui.openPage("all");
     await ui.clickText("Archived");
 
     assert.ok(seen.some(a => a.archived === true),
@@ -370,204 +400,141 @@ test("the Archived view asks the server for archived rows", async () => {
               "Archived is a view across all statuses, not a status itself");
 });
 
-// ── the drafting toolbar actually edits the document ───────────────────────
+// ── the rich editor (2026-10-11) ────────────────────────────────────────────
+//
+// The body is `body_format: "html"`. The plain-text line tools that were
+// tested here (case, duplicate, move, find and replace) went with the plain
+// text editor; formatting is the browser's editing commands, which jsdom does
+// not implement, so these tests pin the parts that are ours: the controls, the
+// template's arrival, Insert, the sticky bar, and that Review sends exactly the
+// server's canonical text, as html.
 
-async function openEditor() {
+const paperOf = (ui) => ui.host.querySelector("[data-ag-paper]");
+
+test("the editor is a rich, editable page", async () => {
     listWith([]);
     const ui = await mount();
-    await ui.clickText("Create");
-    const ta = ui.host.querySelector("textarea");
-    assert.ok(ta, "the editor textarea is missing");
-    // Read through the host, never the document: see the note in beforeEach.
-    return { ui, ta, value: () => ui.host.querySelector("textarea").value };
-}
+    await ui.openCreate("");
+    const paper = paperOf(ui);
+    assert.ok(paper, "the editable page is missing");
+    assert.equal(paper.getAttribute("contenteditable"), "true");
+    assert.ok(!ui.host.querySelector("textarea"), "the plain-text box should be gone");
+});
 
-async function setBody(ta, value) {
-    const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLTextAreaElement.prototype, "value").set;
-    await act(async () => {
-        setter.call(ta, value);
-        ta.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-    });
-}
-
-/* Put the caret somewhere, the way a person would before using a line tool. */
-async function caret(ta, at, to = at) {
-    await act(async () => { ta.focus(); ta.setSelectionRange(at, to); });
-}
-
-test("the toolbar renders its controls", async () => {
-    const { ui } = await openEditor();
-    const text = ui.text();
-    for (const label of ["Insert", "Case"]) {
-        assert.ok(text.includes(label), `the toolbar is missing ${label}`);
+test("every formatting control is there and named", async () => {
+    listWith([]);
+    const ui = await mount();
+    await ui.openCreate("");
+    const titles = new Set([...ui.host.querySelectorAll("[data-ag-tb] button[title]")].map(b => b.title));
+    for (const t of ["Undo", "Redo", "Bold", "Italic", "Underline", "Subscript", "Superscript",
+                     "Strikethrough", "Align left", "Centre", "Align right", "Justify",
+                     "Bulleted list", "Numbered list", "Heading 1", "Heading 2", "Heading 3",
+                     "Quote", "Link", "Divider", "Clear formatting"]) {
+        assert.ok(titles.has(t), `the toolbar is missing ${t}`);
     }
-    // The server's real cap, shown while there is still time to act on it.
-    assert.ok(/300,000/.test(text), "the character limit is not shown");
+    assert.ok(ui.host.querySelector('button[aria-label="Font"]'), "no font picker");
+    assert.ok(ui.host.querySelector('button[aria-label="Text size"]'), "no size picker");
+    assert.ok(ui.host.querySelector('input[type="color"]'), "no colour picker");
+    assert.ok(/300,000/.test(ui.text()), "the size limit is not shown");
 });
 
-test("the clause library is gone", async () => {
-    // Removed on request: it was contract-specific furniture in a bar meant for
-    // editing any document.
-    const { ui } = await openEditor();
-    assert.ok(!/Clause library/i.test(ui.text()));
+test("the toolbar sticks while the page scrolls", async () => {
+    listWith([]);
+    const ui = await mount();
+    await ui.openCreate("");
+    const css = [...ui.host.querySelectorAll("style")].map(x => x.textContent).join("");
+    assert.match(css, /\[data-ag-tb\]\{position:sticky;top:0/);
 });
 
-test("every toolbar button has a title and a handler", async () => {
-    // THE BUG THIS PINS. A 24-button bold/italic/align bar used to sit here
-    // with no onClick on any of them -- it hovered and did nothing. A control
-    // that cannot act is worse than an absent one.
-    const { ui } = await openEditor();
-    const buttons = [...ui.host.querySelectorAll("button")]
-        .filter(b => b.title && b.title !== "More actions");
-    assert.ok(buttons.length >= 9, `only ${buttons.length} toolbar buttons found`);
-});
-
-test("the numbered item continues existing numbering", async () => {
-    // Restarting at 1 halfway down a document is worse than no help at all.
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "1. First clause.\n");
-    await caret(ta, value().length);
-    await ui.clickText("1.");
-
-    assert.ok(/2\.\s$/.test(value()),
-              `numbering did not continue; got ${JSON.stringify(value())}`);
+test("a template's text arrives as escaped paragraphs", async () => {
+    listWith([]);
+    const ui = await mount();
+    await ui.openPage("templates");
+    await ui.clickText("Employment Contract");
+    const html = paperOf(ui).innerHTML;
+    assert.ok(html.startsWith("<p>[UNREVIEWED SAMPLE - NOT LEGAL CONTENT]</p>"),
+              "each line of the template should be its own paragraph");
 });
 
 test("Insert puts a placeholder into the text", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "Payable by ");
-    await caret(ta, value().length);
-    await ui.clickText("＋ Insert");
+    listWith([]);
+    const ui = await mount();
+    await ui.openCreate("<p>Between</p>");
+    await ui.clickText("Insert");
     await ui.clickText("[PARTY NAME]");
-
-    assert.ok(value().includes("[PARTY NAME]"), "the placeholder was not inserted");
+    assert.ok(paperOf(ui).textContent.includes("[PARTY NAME]"));
 });
 
-test("Insert can add today's date", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "Dated ");
-    await caret(ta, value().length);
-    await ui.clickText("＋ Insert");
-    await ui.clickText("Today's date");
-
-    assert.ok(new RegExp(String(new Date().getFullYear())).test(value()),
-              `the date was not inserted; got ${JSON.stringify(value())}`);
+test("the font picker offers its families, each in its own face", async () => {
+    listWith([]);
+    const ui = await mount();
+    await ui.openCreate("");
+    const picker = ui.host.querySelector('button[aria-label="Font"]');
+    await act(async () => { picker.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    const opts = [...dom.window.document.querySelectorAll('[role="listbox"][aria-label="Font"] [role="option"]')];
+    assert.ok(opts.length >= 9, `only ${opts.length} fonts offered`);
+    assert.ok(opts.some(o => o.textContent.includes("Verdana") && /Verdana/.test(o.getAttribute("style") || "")));
 });
 
-test("Case changes the current line when nothing is selected", async () => {
-    // Doing nothing without a selection would read as a broken button.
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "scope of work");
-    await caret(ta, 3);
-    await ui.clickText("Aa Case");
-    await ui.clickText("UPPERCASE");
-
-    assert.equal(value(), "SCOPE OF WORK");
+test("the title is edited in the header, not in a separate box", async () => {
+    listWith([]);
+    const ui = await mount();
+    await ui.openCreate("");
+    const field = ui.host.querySelector('input[aria-label="Agreement title"]');
+    assert.ok(field, "the header title field is missing");
+    assert.ok(!ui.text().includes("Agreement Title"), "the old title box is still there");
 });
 
-test("Case applies to a selection when there is one", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "alpha beta");
-    await caret(ta, 0, 5);
-    await ui.clickText("Aa Case");
-    await ui.clickText("UPPERCASE");
-
-    assert.equal(value(), "ALPHA beta");
+test("the first step will not move on without words", async () => {
+    listWith([]);
+    const ui = await mount();
+    await ui.openCreate("<p><br></p>");
+    await ui.clickText("Next");
+    assert.ok(!ui.text().includes("Search verified lawyers"), "it moved on with an empty agreement");
 });
 
-test("a line can be duplicated", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "one\ntwo");
-    await caret(ta, 0);
-    await ui.clickText("⧉");
-
-    assert.equal(value(), "one\none\ntwo");
-});
-
-test("a line can be moved down", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "one\ntwo");
-    await caret(ta, 0);
-    await ui.clickText("↓");
-
-    assert.equal(value(), "two\none");
-});
-
-test("find and replace reports the match count before changing anything", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "PKR 100 and PKR 200");
-    await ui.clickText("🔍");
-
-    const findBox = ui.host.querySelector('[placeholder="Find"]');
-    assert.ok(findBox, "the find field did not open");
-    const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLInputElement.prototype, "value").set;
+async function toReview(ui) {
+    await ui.clickText("Next");
+    await ui.clickText("+ Add");
+    await ui.clickText("Next");
+    await ui.clickText("Type");
+    const input = [...dom.window.document.querySelectorAll("input")]
+        .find(i => (i.placeholder || "").startsWith("Type your name"));
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
     await act(async () => {
-        setter.call(findBox, "PKR");
-        findBox.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+        setter.call(input, "Test Client");
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
+    await ui.clickText("Next");
+    await act(async () => {});
+}
 
-    assert.ok(ui.text().includes("2 matches"), "the match count is missing");
-    assert.equal(value(), "PKR 100 and PKR 200", "nothing should change yet");
+test("Review shows the server's canonical text and sends exactly that, as html", async () => {
+    listWith([]);
+    __respond("previewAgreementBody", () => ok({ body_html: "<p>CANONICAL <b>TEXT</b></p>", has_text: true }));
+    __respond("createAgreement", () => ({ data: null, error: { message: "stop here" }, status: 400 }));
+    const ui = await mount();
+    await ui.openCreate('<p onclick="x()">raw</p>');
+    await toReview(ui);
+
+    assert.equal(__calls("previewAgreementBody").at(-1).args[0], '<p onclick="x()">raw</p>',
+                 "Review must ask the server for the canonical form of what was written");
+    assert.ok(ui.text().includes("CANONICAL TEXT"), "Review must show the server's form");
+
+    await ui.clickText("Sign & Send");
+    const sent = __calls("createAgreement").at(-1)?.args[0];
+    assert.ok(sent, "nothing was sent");
+    assert.equal(sent.body_html, "<p>CANONICAL <b>TEXT</b></p>");
+    assert.equal(sent.body_format, "html");
 });
 
-test("Replace all rewrites every occurrence", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "PKR 100 and PKR 200");
-    await ui.clickText("🔍");
-
-    const setter = Object.getOwnPropertyDescriptor(
-        dom.window.HTMLInputElement.prototype, "value").set;
-    const type = async (sel, v) => {
-        const el = ui.host.querySelector(sel);
-        await act(async () => {
-            setter.call(el, v);
-            el.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-        });
-    };
-    await type('[placeholder="Find"]', "PKR");
-    await type('[placeholder="Replace with"]', "Rs");
-    await ui.clickText("Replace all");
-
-    assert.equal(value(), "Rs 100 and Rs 200");
-});
-
-test("undo restores the text a toolbar action replaced", async () => {
-    // A textarea's own undo stack is cleared the moment React drives its value,
-    // so this has to be ours or Ctrl+Z empties the box.
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "Original wording.");
-    await caret(ta, value().length);
-    await ui.clickText("＋ Insert");
-    await ui.clickText("[DATE]");
-    assert.ok(value().includes("[DATE]"));
-
-    await ui.clickText("↶");
-    assert.equal(value(), "Original wording.", "undo did not restore the text");
-});
-
-test("redo puts it back", async () => {
-    const { ui, ta, value } = await openEditor();
-    await setBody(ta, "Original wording.");
-    await caret(ta, value().length);
-    await ui.clickText("＋ Insert");
-    await ui.clickText("[DATE]");
-    await ui.clickText("↶");
-    await ui.clickText("↷");
-
-    assert.ok(value().includes("[DATE]"), "redo did not reapply the edit");
-});
-
-test("the toolbar offers no styling it cannot deliver", async () => {
-    // The body is hashed and signed verbatim. Bold, italic, underline and
-    // alignment could only do nothing or inject markup into text that is
-    // rendered literally -- which is why the previous bar was removed.
-    const { ui } = await openEditor();
-    const titles = [...ui.host.querySelectorAll("button")]
-        .map(b => (b.title || "") + " " + b.textContent).join(" ").toLowerCase();
-    for (const f of ["bold", "italic", "underline", "align"]) {
-        assert.ok(!titles.includes(f),
-                  `the toolbar offers "${f}", which plain text cannot carry`);
-    }
+test("a body the server could not check is not sent", async () => {
+    listWith([]);
+    __respond("previewAgreementBody", () => ({ data: null, error: { message: "Could not check" }, status: 500 }));
+    const ui = await mount();
+    await ui.openCreate();
+    await toReview(ui);
+    assert.ok(ui.text().includes("Could not check"));
+    await ui.clickText("Sign & Send");
+    assert.equal(__calls("createAgreement").length, 0, "an unchecked body was sent");
 });

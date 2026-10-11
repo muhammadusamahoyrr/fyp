@@ -3,13 +3,16 @@
 import React, { useState, useRef, useEffect } from "react";
 import { usePathname, useRouter as useNextRouter } from "next/navigation";
 import { reviewRequestDeepLink } from "@/lib/reviewRequests.js";
+import { listEngagements } from "@/lib/api.js";
+import { isDraftCase } from "@/lib/caseStatus.js";
 import { DARK, LIGHT, ThemeCtx, HeaderActionsCtx } from "./theme.js";
+import { CLIENT_TOKENS_CSS, clientThemeOnTokens, clientMode } from "./clientTheme.js";
 import { CaseProvider, useCase } from "./CaseContext.jsx";
 import { LangProvider, useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { requestDocumentsView, requestOpenDocument, DOCUMENTS_SHOWN_EVENT } from "@/lib/documentsNav.js";
+import { requestAgreementsView, AGREEMENTS_SHOWN_EVENT, AGREEMENTS_DIY_ENABLED } from "@/lib/agreementsNav.js";
 import Ic from "./Ic.jsx";
-import ThemeToggle from "./ThemeToggle.jsx";
 import ModOverview from "./ModOverview.jsx";
 import ModProfile from "./ModProfile.jsx";
 import ModIntake from "./ModIntake.jsx";
@@ -31,10 +34,11 @@ const getLiveDate = (lang = "en") =>
     });
 
 const SIDE_ITEMS = [
-    { id: "overview", icon: "home", label: "Overview", ur: "جائزہ" },
-    { id: "profile", icon: "user", label: "Profile", ur: "پروفائل" },
-    { id: "intake", icon: "brief", label: "Legal Intake", ur: "قانونی درخواست" },
-    { id: "chatbot", icon: "bot", label: "AI Chat", ur: "اے آئی چیٹ" },
+    // Profile is not here: it lives in the account menu at the bottom.
+    { id: "overview", icon: "home", label: "Overview", ur: "جائزہ", group: "matters" },
+    { id: "intake", icon: "brief", label: "Legal Intake", ur: "قانونی درخواست", group: "matters" },
+    { id: "tracking", icon: "clock", label: "Tracking", ur: "کیس ٹریکنگ", group: "matters" },
+    { id: "chatbot", icon: "bot", label: "AI Chat", ur: "اے آئی چیٹ", group: "help" },
     // OUT OF SCOPE, 2026-09-23. "Legal Tools" (`tools`) and "Property Dispute"
     // (`disputes`) are hidden from navigation at the owner's decision: neither
     // is in the current scope, so neither should be reachable from a screen.
@@ -44,10 +48,17 @@ const SIDE_ITEMS = [
     // lines back. The lawyer-side counterpart ("Overseas Disputes", which is
     // where a client's property dispute arrives) is hidden in
     // `components/lawyer/layout.jsx` for the same reason.
-    { id: "lawyers", icon: "search", label: "Lawyers", ur: "وکلاء" },
-    { id: "agreements", icon: "pen", label: "Agreements", ur: "معاہدے" },
-    { id: "documents", icon: "file", label: "Documents", ur: "دستاویزات" },
-    { id: "tracking", icon: "clock", label: "Tracking", ur: "کیس ٹریکنگ" },
+    { id: "lawyers", icon: "search", label: "Lawyers", ur: "وکلاء", group: "help" },
+    { id: "documents", icon: "file", label: "Documents", ur: "دستاویزات", group: "paper" },
+    { id: "agreements", icon: "pen", label: "Agreements", ur: "معاہدے", group: "paper" },
+];
+
+/* The nav's sections, in order. Plain labels: always open, so the only
+ * menu that opens and closes is Documents' own. */
+const SIDE_GROUPS = [
+    { id: "matters", label: "Your matters", ur: "آپ کے معاملات" },
+    { id: "help", label: "Get help", ur: "مدد لیں" },
+    { id: "paper", label: "Paperwork", ur: "کاغذات" },
 ];
 
 /* Sections under a nav item, shown while that item is open. Only views that
@@ -58,6 +69,17 @@ const SUB_ITEMS = {
         { view: "drafts", label: "AI drafting", ur: "اے آئی ڈرافٹنگ" },
         { view: "new", label: "Templates", ur: "ٹیمپلیٹس" },
         { view: "vault", label: "Vault", ur: "والٹ" },
+    ],
+    // The Agreements module's pages (its inner sidebar until 2026-10-11).
+    // Templates only while the DIY builder is on. No "Create" item: a new
+    // agreement starts from Templates (which has "Blank agreement"), so the
+    // two were one route listed twice (2026-10-11).
+    agreements: [
+        { view: "dashboard", label: "Dashboard", ur: "ڈیش بورڈ" },
+        ...(AGREEMENTS_DIY_ENABLED ? [
+            { view: "templates", label: "Templates", ur: "ٹیمپلیٹس" },
+        ] : []),
+        { view: "all", label: "All agreements", ur: "تمام معاہدے" },
     ],
 };
 
@@ -228,9 +250,84 @@ const NotifDrawer = ({ open, onClose, onGoTracking, onOpenDocument, onOpenReview
 };
 
 /* ─── Inner Dashboard ───────────────────────────────────────── */
+/* The client sidebar (2026-10-11): the lawyer sidebar's look, as the
+ * client's own copy -- scoped by [data-client-side], fed client tokens, so
+ * nothing here can reach the lawyer shell. */
+const CLIENT_SIDE_CSS = `
+[data-client-side] .cs-item{position:relative;display:flex;align-items:center;gap:11px;width:100%;height:38px;padding:0 10px;margin:2px 0;border:0;border-radius:9px;background:transparent;color:var(--cs-dim);font:inherit;font-size:14.5px;font-weight:550;text-align:left;cursor:pointer;transition:background .15s,color .15s}
+[data-client-side] .cs-item:hover{background:var(--cs-hover);color:var(--cs-ink)}
+[data-client-side] .cs-ic{position:relative;width:24px;height:24px;flex:none;display:grid;place-items:center;color:var(--cs-muted);transition:color .15s}
+[data-client-side] .cs-item:hover .cs-ic{color:var(--cs-ink)}
+[data-client-side] .cs-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-client-side] .cs-item.on{background:linear-gradient(90deg,#1F7A4D,#147C74);color:#fff;font-weight:650;box-shadow:0 8px 18px -12px rgba(20,124,116,.9)}
+[data-client-side] .cs-item.on .cs-ic{color:#fff}
+[data-client-side] .cs-chev{display:grid;place-items:center;color:inherit;transition:transform .2s}
+[data-client-side] .cs-rail{position:relative;margin:2px 0 6px 14px;padding-left:12px;animation:csIn .18s ease-out}
+[data-client-side] .cs-rail::after{content:"";position:absolute;left:0;top:-4px;bottom:0;width:1px;background:var(--cs-line);pointer-events:none}
+@keyframes csIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+[data-client-side] .cs-item.sub{height:33px;padding:0 10px;gap:10px;font-size:13.5px;font-weight:520}
+[data-client-side] .cs-item.sub[aria-current="page"]{background:var(--cs-hover);color:var(--cs-accent);font-weight:650}
+[data-client-side] .cs-item.sub[aria-current="page"]::before{content:"";position:absolute;left:-12.5px;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--cs-accent);z-index:1}
+[data-client-side] .cs-badge{flex:none;min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;border-radius:999px;background:var(--cs-danger);color:#fff;font-size:11px;font-weight:700}
+[data-client-side] .cs-badge.gold{background:rgba(242,195,94,.18);color:var(--gold,#f2c35e)}
+[data-client-side] .cs-badge.cyan{background:rgba(106,221,235,.16);color:#3fbfd0}
+[data-client-side] .cs-item.on .cs-badge.gold,[data-client-side] .cs-item.on .cs-badge.cyan{background:rgba(255,255,255,.2);color:#fff}
+[data-client-side] .cs-new{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 24px);height:36px;margin:12px 12px 2px;border:0;border-radius:999px;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;font:inherit;font-size:13.5px;font-weight:650;cursor:pointer;flex-shrink:0;box-shadow:0 6px 14px -10px rgba(28,156,102,.9);transition:filter .15s,transform .12s}
+[data-client-side] .cs-new:hover{filter:brightness(1.08)}
+[data-client-side] .cs-new:active{transform:scale(.97)}
+[data-client-side] .cs-new svg{transition:transform .25s}
+[data-client-side] .cs-new:hover svg{transform:rotate(90deg)}
+[data-client-side][data-collapsed] .cs-new{width:38px;height:38px;margin:12px auto 4px;padding:0}
+[data-client-side] .cs-sec{margin:12px 0 3px;padding:4px 6px;color:var(--cs-muted);font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+[data-client-side] .cs-sec:first-child{margin-top:2px}
+[data-client-side] .cs-gap{height:1px;margin:8px 10px;background:var(--cs-line)}
+.cs-tip{position:fixed;z-index:80;transform:translateY(-50%);white-space:nowrap;padding:6px 10px;border-radius:8px;background:var(--cs-tip-bg);border:1px solid var(--cs-tip-line);color:var(--cs-tip-ink);font-size:12.5px;font-weight:600;box-shadow:0 10px 20px -10px rgba(0,0,0,.6);pointer-events:none;animation:csTip .12s ease-out}
+@keyframes csTip{from{opacity:0;transform:translate(-4px,-50%)}to{opacity:1;transform:translate(0,-50%)}}
+[data-client-side] .cs-dot{position:absolute;top:-2px;right:-3px;width:8px;height:8px;border-radius:50%;background:var(--cs-danger);border:2px solid var(--cs-bg)}
+[data-client-side][data-collapsed] .cs-item{justify-content:center;padding:0}
+[data-client-side] .cs-logo{width:38px;height:38px;flex:none;display:grid;place-items:center;border:0;padding:0;background:none;cursor:pointer}
+[data-client-side] .cs-logo img{width:38px;height:38px;object-fit:contain;display:block}
+[data-client-side] .cs-word{flex:1;min-width:0;font-size:18px;font-weight:800;letter-spacing:-.01em;color:var(--cs-ink);white-space:nowrap}
+[data-client-side] .cs-word span{color:var(--cs-accent)}
+[data-client-side] .cs-fold{width:36px;height:36px;flex:none;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--cs-muted);cursor:pointer;transition:background .15s}
+[data-client-side] .cs-fold:hover{background:var(--cs-hover)}
+[data-client-side] .cs-fold .fl,[data-client-side] .cs-fold .fa{transform-box:fill-box;transform-origin:left center}
+[data-client-side] .cs-fold.go .fa{animation:csArrowGo .22s ease-in forwards}
+[data-client-side] .cs-fold.go .fl{animation:csLineGo .22s ease-in forwards}
+[data-client-side][data-collapsed] .cs-fold .fa{transform:scaleX(-1);transform-origin:center}
+@keyframes csArrowGo{to{transform:translateX(-5px);opacity:.6}}
+@keyframes csLineGo{to{transform:scaleX(.2)}}
+[data-client-side] .cs-av{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:50%;background:linear-gradient(135deg,#3ee0a1,#2ec4d6);color:#04212a;font-size:12px;font-weight:800}
+[data-client-side] .cs-me{flex:1;min-width:0;display:flex;align-items:center;gap:9px;padding:5px 6px;border:0;border-radius:10px;background:transparent;color:var(--cs-ink);font:inherit;cursor:pointer;transition:background .15s}
+[data-client-side] .cs-me:hover,[data-client-side] .cs-me[aria-expanded="true"]{background:var(--cs-hover)}
+[data-client-side] .cs-me b,[data-client-side] .cs-menu-who b{display:block;font-size:13.5px;line-height:1.25;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-client-side] .cs-me small,[data-client-side] .cs-menu-who small{display:block;font-size:12px;line-height:1.25;color:var(--cs-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-client-side] .cs-bell{position:relative;width:34px;height:34px;flex:none;display:grid;place-items:center;border:0;border-radius:9px;background:transparent;color:var(--cs-muted);cursor:pointer;transition:background .15s,color .15s}
+[data-client-side] .cs-bell:hover{background:var(--cs-hover);color:var(--cs-ink)}
+[data-client-side] .cs-bell b{position:absolute;top:-1px;right:-2px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;display:grid;place-items:center;background:var(--cs-danger);color:#fff;font-size:9px;font-weight:700}
+[data-client-side] .cs-menu{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);z-index:60;padding:6px;border-radius:14px;background:var(--cs-bg);border:1px solid var(--cs-line);box-shadow:0 20px 44px -14px rgba(0,0,0,.65);animation:csUp .16s ease-out}
+@keyframes csUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+[data-client-side] .cs-menu-who{display:flex;align-items:center;gap:10px;padding:10px;margin-bottom:4px;border-radius:10px;background:var(--cs-hover);color:var(--cs-ink)}
+[data-client-side] .cs-menu button{display:flex;align-items:center;justify-content:space-between;width:100%;height:38px;padding:0 12px;border:0;border-radius:8px;background:none;color:var(--cs-dim);font:inherit;font-size:14px;font-weight:550;cursor:pointer}
+[data-client-side] .cs-menu button:hover{background:var(--cs-hover);color:var(--cs-ink)}
+[data-client-side] .cs-menu button.danger{color:var(--cs-danger)}
+[data-client-side] .cs-menu-sep{height:1px;background:var(--cs-line);margin:4px 6px}
+@media (prefers-reduced-motion:reduce){[data-client-side] *{animation:none!important}}
+`;
+
 const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) => {
-    const t = isDark ? DARK : LIGHT;
-    const { unreadCount } = useCase();
+    // The lawyer documents' palette, as the client's own copy (clientTheme.js):
+    // neutral colours read CSS tokens that <body> carries while this is mounted,
+    // so dialogs portalled to <body> are themed too. No layout changes.
+    const t = clientThemeOnTokens(isDark ? DARK : LIGHT);
+    useEffect(() => {
+        const body = document.body;
+        body.setAttribute("data-client-theme", "");
+        body.setAttribute("data-mode", clientMode(t));
+        return () => { body.removeAttribute("data-client-theme"); body.removeAttribute("data-mode"); };
+    }, [t.mode]);
+    const { unreadCount, cases } = useCase();
+    const draftCount = (cases || []).filter(isDraftCase).length;
     const { T, lang, toggleLang } = useLang();
     const { user } = useAuth();
     const isMobile = useIsMobile();
@@ -239,15 +336,36 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const [acctOpen, setAcctOpen] = useState(false);   // the account menu
+    const [folding, setFolding] = useState(false);     // the fold button's click motion
+    const [tip, setTip] = useState(null);              // the collapsed sidebar's hover label
+    const [termsCount, setTermsCount] = useState(0);   // lawyers' proposed terms awaiting the client
+    useEffect(() => {
+        if (!acctOpen) return undefined;
+        const close = (e) => { if (!e.target.closest?.("[data-client-account]")) setAcctOpen(false); };
+        const esc = (e) => { if (e.key === "Escape") setAcctOpen(false); };
+        document.addEventListener("mousedown", close);
+        document.addEventListener("keydown", esc);
+        return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
+    }, [acctOpen]);
     // The Documents section last opened from its sub-menu, for highlighting.
     const [docSection, setDocSection] = useState("new");
     // Whether the Documents sub-menu is open. Its own toggle (the ▲/▼ on the
     // item), so opening the menu never navigates anywhere by itself.
     const [docMenuOpen, setDocMenuOpen] = useState(initialTab === "documents");
+    // The same for Agreements: its page, and whether its sub-menu is open.
+    const [agSection, setAgSection] = useState("dashboard");
+    const [agMenuOpen, setAgMenuOpen] = useState(initialTab === "agreements");
     useEffect(() => {
         const onShown = e => { if (e?.detail?.view) setDocSection(e.detail.view); };
+        // Writing an agreement is reached through Templates, so it lights that.
+        const onAgShown = e => { if (e?.detail?.view) setAgSection(e.detail.view === "create" ? "templates" : e.detail.view); };
         window.addEventListener(DOCUMENTS_SHOWN_EVENT, onShown);
-        return () => window.removeEventListener(DOCUMENTS_SHOWN_EVENT, onShown);
+        window.addEventListener(AGREEMENTS_SHOWN_EVENT, onAgShown);
+        return () => {
+            window.removeEventListener(DOCUMENTS_SHOWN_EVENT, onShown);
+            window.removeEventListener(AGREEMENTS_SHOWN_EVENT, onAgShown);
+        };
     }, []);
     const contentRef = useRef(null);
 
@@ -257,6 +375,19 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     useEffect(() => {
         if (contentRef.current) contentRef.current.scrollTop = 0;
     }, [tab]);
+
+    // Terms a lawyer proposed, for the Lawyers badge. Re-read on each tab
+    // change, since answering them happens on a tab. A failed read shows none.
+    useEffect(() => {
+        let live = true;
+        Promise.resolve(listEngagements()).then(res => {
+            if (!live) return;
+            const rows = res?.data?.items || res?.data || [];
+            setTermsCount(Array.isArray(rows) ? rows.filter(e => e.status === "terms_proposed").length : 0);
+        }).catch(() => {});
+        return () => { live = false; };
+    }, [tab]);
+    useEffect(() => { if (!isCollapsed) setTip(null); }, [isCollapsed]);
 
     // The mini-collapsed sidebar makes no sense inside the mobile drawer
     useEffect(() => {
@@ -288,7 +419,7 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     const liveDate = getLiveDate(lang);
 
     const modules = {
-        overview: <ModOverview />,
+        overview: <ModOverview onOpenNotifications={() => setDrawerOpen(true)} />,
         profile: <ModProfile />,
         intake: <ModIntake />,
         chatbot: <ModChatbot />,
@@ -302,12 +433,14 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
 
     // Documents draws its own header and manages its own scrolling: its
     // screens (drafting) are full-height workspaces.
-    const noTopbar = tab === "agreements" || tab === "chatbot" || tab === "tracking" || tab === "documents";
+    // Lawyers (2026-10-10) draws its own title, as Documents does.
+    const noTopbar = tab === "agreements" || tab === "chatbot" || tab === "tracking" || tab === "documents" || tab === "lawyers" || tab === "intake" || tab === "overview" || tab === "profile";
     const noPadding = tab === "agreements" || tab === "chatbot" || tab === "documents";
 
     return (
         <ThemeCtx.Provider value={t}>
             <HeaderActionsCtx.Provider value={{ setHeaderActions }}>
+                <style>{CLIENT_TOKENS_CSS}</style>
 
                 <NotifDrawer
                     open={drawerOpen}
@@ -318,7 +451,7 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                     t={t}
                 />
 
-                <div style={{
+                <div data-client-theme="" data-mode={clientMode(t)} style={{
                     display: "flex", height: "100vh", overflow: "hidden",
                     background: t.bg,
                     transition: "background 0.5s cubic-bezier(0.4,0,0.2,1)",
@@ -331,16 +464,19 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                     )}
 
                     {/* ══════════════ SIDEBAR (drawer on mobile) ══════════════ */}
-                    <div style={{
-                        width: isMobile ? 260 : (isCollapsed ? 70 : 238),
-                        minWidth: isMobile ? 260 : (isCollapsed ? 70 : 238),
+                    <style>{CLIENT_SIDE_CSS}</style>
+                    <div data-client-side="" data-collapsed={isCollapsed || undefined} style={{
+                        "--cs-bg": t.surface, "--cs-ink": t.text, "--cs-dim": t.textDim, "--cs-muted": t.textMuted,
+                        "--cs-hover": t.primaryGlow2, "--cs-line": t.border, "--cs-accent": t.primary, "--cs-danger": t.danger,
+                        "--cs-tip-bg": t.surface, "--cs-tip-line": t.border, "--cs-tip-ink": t.text,
+                        width: isMobile ? 260 : (isCollapsed ? 64 : 216),
+                        minWidth: isMobile ? 260 : (isCollapsed ? 64 : 216),
                         background: t.surface,
-                        borderRight: `1.5px solid ${t.border}`,
+                        borderRight: `1px solid ${t.border}`,
                         display: "flex", flexDirection: "column",
-                        transition: "all 0.4s cubic-bezier(0.4,0,0.2,1)",
-                        boxShadow: isDark ? "none" : "3px 0 16px rgba(26,46,53,0.08)",
+                        transition: "width .25s ease, min-width .25s ease",
                         zIndex: isMobile ? 41 : 10,
-                        overflow: "hidden",
+                        overflowX: "hidden",
                         ...(isMobile ? {
                             position: "fixed", top: 0, bottom: 0, left: 0,
                             transform: mobileNavOpen ? "translateX(0)" : "translateX(-105%)",
@@ -348,74 +484,34 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                         } : {}),
                     }}>
 
-                        {/* ══ LOGO AREA ══ */}
+                        {/* ══ BRAND ══ */}
                         <div style={{
-                            padding: isCollapsed ? "10px 0" : "10px 14px",
-                            borderBottom: `1.5px solid ${t.border}`,
-                            display: "flex",
-                            alignItems: "center",
+                            padding: isCollapsed ? "0" : "0 10px 0 14px", minHeight: 64,
+                            display: "flex", alignItems: "center", gap: 10,
+                            borderBottom: `1px solid ${t.border}`, flexShrink: 0,
                             justifyContent: isCollapsed ? "center" : "flex-start",
-                            gap: 8,
-                            minHeight: 62,
-                            height: 62,
                         }}>
-                            {/* Logo image */}
-                            <img
-                                src="./logo.png"
-                                alt="Attorney.AI"
-                                onClick={() => isCollapsed && setTab("overview")}
-                                style={{
-                                    width: 48,
-                                    height: 49,
-                                    objectFit: "contain",
-                                    flexShrink: 0,
-                                    cursor: isCollapsed ? "pointer" : "default",
-                                    borderRadius: 10,
-                                    display: "block",
-                                }}
-                            />
-
-                            {/* Brand text — hidden when collapsed */}
-                            {!isCollapsed && (
-                                <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
-                                    <span style={{
-                                        fontFamily: "'Playfair Display', serif",
-                                        fontSize: 23,
-                                        fontWeight: 900,
-                                        color: t.text,
-                                        letterSpacing: "-0.6px",
-                                        whiteSpace: "nowrap",
-                                        lineHeight: 1,
-                                    }}>
-                                        Attorney<span style={{ color: t.primary }}>.AI</span>
-                                    </span>
-                                </div>
-                            )}
-
-                            {/* Collapse toggle */}
-                            <button
-                                onClick={() => setIsCollapsed(!isCollapsed)}
-                                style={{
-                                    marginLeft: isCollapsed ? 0 : "auto",
-                                    width: 30, height: 30,
-                                    background: "transparent", border: "none",
-                                    cursor: "pointer",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    color: t.textMuted, borderRadius: 8, flexShrink: 0,
-                                    transition: "background 0.2s, color 0.2s",
-                                }}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.background = t.inputBg;
-                                    e.currentTarget.style.color = t.primary;
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.background = "transparent";
-                                    e.currentTarget.style.color = t.textMuted;
-                                }}
-                            >
-                                <Ic n="menu" s={20} />
+                            <button type="button" className="cs-logo" title={isCollapsed ? T("Expand sidebar", "سائیڈبار کھولیں") : "Attorney.AI"}
+                                onClick={() => (isCollapsed ? setIsCollapsed(false) : setTab("overview"))}>
+                                <img src="./logo.png" alt="Attorney.AI" />
                             </button>
+                            {!isCollapsed && (<>
+                                <div className="cs-word">Attorney<span>AI</span></div>
+                                <button type="button" className={`cs-fold${folding ? " go" : ""}`}
+                                    onClick={() => { if (folding) return; setFolding(true); setTimeout(() => { setFolding(false); setIsCollapsed(true); }, 220); }}
+                                    aria-label={T("Collapse sidebar", "سائیڈبار بند کریں")} title={T("Collapse sidebar", "سائیڈبار بند کریں")}>
+                                    <svg width={30} height={30} viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="4.5" fill="var(--cs-accent)" opacity=".16" /><path d="M6.5 3H10v18H6.5A4.5 4.5 0 0 1 2 16.5v-9A4.5 4.5 0 0 1 6.5 3z" fill="var(--cs-accent)" /><g stroke="#04212A" strokeWidth="2" strokeLinecap="round"><path className="fl" d="M4.3 7.2h3.9" /><path className="fl" d="M4.3 10.4h3.9" /><path className="fl" d="M4.3 13.6h3.9" /></g><path className="fa" d="M21.2 12.5h-8.4M16.6 8.7l-3.8 3.8 3.8 3.8" stroke="var(--cs-ink)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                </button>
+                            </>)}
                         </div>
+
+                        {/* ══ NEW MATTER: the one primary action ══ */}
+                        <button type="button" className="cs-new" aria-label={T("New matter", "نیا معاملہ")}
+                            title={isCollapsed ? T("New matter", "نیا معاملہ") : undefined}
+                            onClick={() => { setDocMenuOpen(false); navRouter.push("/intake"); setMobileNavOpen(false); }}>
+                            <Ic n="plus" s={isCollapsed ? 18 : 16} c="currentColor" />
+                            {!isCollapsed && T("New matter", "نیا معاملہ")}
+                        </button>
 
                         {/* ══ NAV ITEMS ══ */}
                         {/* `minHeight: 0` is what makes this scroll. A flex child
@@ -425,16 +521,40 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                         {/* `data-lenis-prevent`: the app-wide Lenis smooth scroll
                             takes every wheel event for the page, so without it the
                             wheel did nothing here and only dragging the bar worked. */}
-                        <nav data-lenis-prevent className="thin-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 10px" }}>
-                            {SIDE_ITEMS.map(item => {
+                        <nav data-lenis-prevent className="thin-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: isCollapsed ? "10px 8px 0" : "12px 10px 0" }}>
+                            {SIDE_GROUPS.map((group, gi) => {
+                                return (
+                                <React.Fragment key={group.id}>
+                                {isCollapsed ? (gi > 0 && <div className="cs-gap" aria-hidden="true" />) : (
+                                    <div className="cs-sec">{T(group.label, group.ur)}</div>
+                                )}
+                                {SIDE_ITEMS.filter(item => item.group === group.id).map(item => {
                                 const active = tab === item.id;
-                                const showDot = item.id === "tracking" && unreadCount > 0 && !active;
+                                // Real counts only, and only where the client has something to do.
+                                const count = item.id === "tracking" ? unreadCount
+                                    : item.id === "intake" ? draftCount
+                                    : item.id === "lawyers" ? termsCount : 0;
+                                const tone = item.id === "intake" ? " gold" : item.id === "lawyers" ? " cyan" : "";
+                                const showDot = count > 0 && !(item.id === "tracking" && active);
+                                const tipText = T(item.label, item.ur) + (showDot
+                                    ? (item.id === "intake" ? T(` · ${count} to confirm`, ` · ${count} تصدیق باقی`)
+                                        : item.id === "lawyers" ? T(` · ${count} terms to review`, ` · ${count} شرائط`)
+                                        : T(` · ${count} new`, ` · ${count} نئی`)) : "");
                                 const hasMenu = Boolean(SUB_ITEMS[item.id]);
-                                const subItems = !isCollapsed && hasMenu && docMenuOpen ? SUB_ITEMS[item.id] : [];
+                                const isAg = item.id === "agreements";
+                                const menuOpen = isAg ? agMenuOpen : docMenuOpen;
+                                const section = isAg ? agSection : docSection;
+                                const subItems = !isCollapsed && hasMenu && menuOpen ? SUB_ITEMS[item.id] : [];
                                 return (
                                     <React.Fragment key={item.id}>
                                     <button
-                                        aria-expanded={hasMenu ? docMenuOpen : undefined}
+                                        type="button"
+                                        className={`cs-item${active ? " on" : ""}`}
+                                        aria-current={active ? "page" : undefined}
+                                        aria-label={isCollapsed ? tipText : undefined}
+                                        onMouseEnter={isCollapsed ? (e => { const r = e.currentTarget.getBoundingClientRect(); setTip({ text: tipText, top: r.top + r.height / 2, left: r.right + 10 }); }) : undefined}
+                                        onMouseLeave={isCollapsed ? (() => setTip(null)) : undefined}
+                                        aria-expanded={hasMenu ? menuOpen : undefined}
                                         onClick={() => {
                                             const TAB_PATH = {
                                                 overview: "/dashboard", intake: "/intake",
@@ -454,99 +574,52 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                                 requestDocumentsView("new");
                                                 setDocSection("new");
                                                 setDocMenuOpen(true);
+                                                setAgMenuOpen(false);
+                                            } else if (item.id === "agreements") {
+                                                // As Documents: here, toggle; arriving, its first page.
+                                                if (tab === "agreements") { setAgMenuOpen(o => !o); return; }
+                                                requestAgreementsView("dashboard");
+                                                setAgSection("dashboard");
+                                                setAgMenuOpen(true);
+                                                setDocMenuOpen(false);
                                             } else {
                                                 setDocMenuOpen(false);
+                                                setAgMenuOpen(false);
                                             }
                                             if (path) navRouter.push(path);
                                             else setTab(item.id);
                                             setMobileNavOpen(false);
-                                        }}
-                                        style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: isCollapsed ? 0 : 13,
-                                            width: "100%",
-                                            justifyContent: isCollapsed ? "center" : "flex-start",
-                                            padding: isCollapsed ? "15px 0" : "13px 16px",
-                                            borderRadius: isCollapsed ? 14 : 16,
-                                            border: "none",
-                                            background: active ? t.primaryGlow : "transparent",
-                                            color: active ? t.primary : t.textDim,
-                                            fontSize: 15,
-                                            fontWeight: active ? 700 : 500,
-                                            cursor: "pointer",
-                                            marginBottom: 4,
-                                            transition: "all 0.25s cubic-bezier(0.4,0,0.2,1)",
-                                            textAlign: "left",
-                                            fontFamily: "'Inter', sans-serif",
-                                            letterSpacing: "0.1px",
-                                            borderLeft: active ? `3px solid ${t.primary}` : "3px solid transparent",
-                                            position: "relative",
-                                        }}
-                                        onMouseEnter={e => {
-                                            if (!active) {
-                                                e.currentTarget.style.background = t.inputBg;
-                                                e.currentTarget.style.color = t.text;
-                                            }
-                                        }}
-                                        onMouseLeave={e => {
-                                            if (!active) {
-                                                e.currentTarget.style.background = "transparent";
-                                                e.currentTarget.style.color = t.textDim;
-                                            }
+                                            setTip(null);
                                         }}
                                     >
-                                        <Ic n={item.icon} s={21} c={active ? t.primary : t.textDim} />
-                                        {!isCollapsed && T(item.label, item.ur)}
-                                        {!isCollapsed && (
-                                            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                                                {showDot && (
-                                                    <span style={{
-                                                        fontSize: 10, fontWeight: 800,
-                                                        background: t.danger, color: "#fff",
-                                                        borderRadius: 10, padding: "1px 6px",
-                                                        minWidth: 18, textAlign: "center",
-                                                    }}>
-                                                        {unreadCount}
-                                                    </span>
-                                                )}
-                                                {hasMenu ? (
-                                                    <span aria-hidden="true" style={{
-                                                        width: 24, height: 24, borderRadius: 8,
-                                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                                        background: docMenuOpen ? t.primaryGlow : t.inputBg,
-                                                        color: docMenuOpen ? t.primary : t.textDim,
-                                                        border: `1px solid ${docMenuOpen ? t.primary : t.border}`,
-                                                        transition: "all 0.2s",
-                                                    }}>
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                                                            style={{ transform: docMenuOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
-                                                            <path d="M6 9l6 6 6-6" />
-                                                        </svg>
-                                                    </span>
-                                                ) : active && (
-                                                    <div style={{
-                                                        width: 7, height: 7, borderRadius: "50%",
-                                                        background: t.primary,
-                                                        boxShadow: `0 0 8px ${t.primaryGlow}`,
-                                                    }} />
-                                                )}
-                                            </div>
-                                        )}
-                                        {isCollapsed && showDot && (
-                                            <span style={{
-                                                position: "absolute", top: 8, right: 8,
-                                                width: 8, height: 8, borderRadius: "50%",
-                                                background: t.danger,
-                                            }} />
+                                        <span className="cs-ic">
+                                            <Ic n={item.icon} s={19} c="currentColor" />
+                                            {isCollapsed && showDot && <i className="cs-dot" aria-hidden="true" style={tone ? { background: tone === " gold" ? "#f2c35e" : "#3fbfd0" } : undefined} />}
+                                        </span>
+                                        {!isCollapsed && <span className="cs-label">{T(item.label, item.ur)}</span>}
+                                        {!isCollapsed && showDot && <span className={`cs-badge${tone}`}>{count > 99 ? "99+" : count}</span>}
+                                        {!isCollapsed && hasMenu && (
+                                            <span className="cs-chev" aria-hidden="true">
+                                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"
+                                                    style={{ transform: menuOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
+                                                    <path d="M6 9l6 6 6-6" />
+                                                </svg>
+                                            </span>
                                         )}
                                     </button>
                                     {subItems.length > 0 && (
-                                        <div role="group" aria-label={`${item.label} sections`} style={{ margin: "-2px 0 6px", paddingLeft: 30 }}>
+                                        <div role="group" aria-label={`${item.label} sections`} className="cs-rail">
                                             {subItems.map(sub => (
                                                 <button key={sub.view} type="button"
-                                                    aria-current={docSection === sub.view ? "page" : undefined}
+                                                    aria-current={section === sub.view && tab === item.id ? "page" : undefined}
                                                     onClick={() => {
+                                                        if (isAg) {
+                                                            requestAgreementsView(sub.view);
+                                                            setAgSection(sub.view);
+                                                            if (tab !== "agreements") navRouter.push("/agreements");
+                                                            setMobileNavOpen(false);
+                                                            return;
+                                                        }
                                                         requestDocumentsView(sub.view);
                                                         setDocSection(sub.view);
                                                         // From another tab the request waits until the
@@ -554,16 +627,7 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                                         if (tab !== "documents") navRouter.push("/documents");
                                                         setMobileNavOpen(false);
                                                     }}
-                                                    style={{
-                                                        display: "block", width: "100%", textAlign: "left",
-                                                        padding: "9px 14px", marginBottom: 2, borderRadius: 10,
-                                                        border: "none", background: docSection === sub.view ? t.primaryGlow2 : "transparent",
-                                                        color: docSection === sub.view ? t.primary : t.textDim,
-                                                        fontSize: 13.5, fontWeight: docSection === sub.view ? 700 : 500,
-                                                        cursor: "pointer", fontFamily: "'Inter', sans-serif",
-                                                    }}
-                                                    onMouseEnter={e => { if (docSection !== sub.view) { e.currentTarget.style.background = t.inputBg; e.currentTarget.style.color = t.text; } }}
-                                                    onMouseLeave={e => { if (docSection !== sub.view) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = t.textDim; } }}>
+                                                    className="cs-item sub">
                                                     {T(sub.label, sub.ur)}
                                                 </button>
                                             ))}
@@ -572,87 +636,60 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                     </React.Fragment>
                                 );
                             })}
+                                </React.Fragment>
+                                );
+                            })}
                         </nav>
+                        {tip && isCollapsed && <div className="cs-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>{tip.text}</div>}
 
-                        {/* ══ USER + THEME TOGGLE ══ */}
-                        <div style={{
-                            padding: isCollapsed ? "14px 0" : "10px 12px",
-                            borderTop: `1.5px solid ${t.border}`,
-                            display: "flex", flexDirection: "column", alignItems: "center",
-                        }}>
-                            <div style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: isCollapsed ? 0 : 10,
-                                marginBottom: isCollapsed ? 0 : 8,
-                                justifyContent: isCollapsed ? "center" : "flex-start",
-                                width: "100%",
-                            }}>
-                                <div
-                                    onClick={() => isCollapsed && setTab("profile")}
-                                    style={{
-                                        width: 34, height: 34, borderRadius: "50%",
-                                        background: t.grad1,
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        fontSize: 13, fontWeight: 800,
-                                        color: t.mode === "dark" ? "#1A2E35" : "#FFFFFF",
-                                        flexShrink: 0,
-                                        boxShadow: `0 4px 12px ${t.primaryGlow}`,
-                                        cursor: isCollapsed ? "pointer" : "default",
-                                    }}
-                                >{initials}</div>
-
-                                {!isCollapsed && (
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</div>
-                                        <div style={{ fontSize: 12, color: t.textMuted }}>{T("Client", "کلائنٹ")}</div>
+                        {/* ══ ACCOUNT: click the person for the menu ══ */}
+                        <div data-client-account="" style={{ borderTop: `1px solid ${t.border}`, padding: isCollapsed ? "6px" : "5px 8px", flexShrink: 0, position: "relative" }}>
+                            {acctOpen && (
+                                <div role="menu" className="cs-menu" style={isCollapsed ? { left: 6, right: "auto", width: 240 } : undefined}>
+                                    <div className="cs-menu-who">
+                                        <span className="cs-av">{initials}</span>
+                                        <span style={{ minWidth: 0 }}>
+                                            <b>{displayName}</b>
+                                            {user?.email && <small>{user.email}</small>}
+                                        </span>
                                     </div>
-                                )}
-                                {!isCollapsed && (
-                                    <button
-                                        onClick={toggleLang}
-                                        title={T("اردو میں دیکھیں", "Switch to English")}
-                                        style={{
-                                            flexShrink: 0, height: 28, padding: "0 10px",
-                                            borderRadius: 8, border: `1.5px solid ${t.border}`,
-                                            background: "transparent", color: t.textDim,
-                                            fontSize: 12, fontWeight: 700, cursor: "pointer",
-                                            fontFamily: "inherit", transition: "all 0.2s",
-                                        }}
-                                        onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
-                                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textDim; }}
-                                    >
-                                        {T("اردو", "EN")}
+                                    <button type="button" role="menuitem" onClick={() => { setAcctOpen(false); navRouter.push("/profile"); setMobileNavOpen(false); }}>
+                                        {T("Profile", "پروفائل")} <Ic n="user" s={17} />
                                     </button>
-                                )}
-                            </div>
-
-                            {!isCollapsed && (
-                                <div style={{ display: "flex", gap: 6, width: "100%" }}>
-                                    <ThemeToggle isDark={isDark} toggle={toggleTheme} />
-                                    <button
-                                        onClick={() => go("signout")}
-                                        style={{
-                                            flex: 1, background: t.inputBg,
-                                            border: `1.5px solid ${t.border}`,
-                                            color: t.textDim, borderRadius: 50,
-                                            display: "flex", alignItems: "center", gap: 6,
-                                            justifyContent: "center", fontSize: 13,
-                                            fontFamily: "'Inter', sans-serif",
-                                            cursor: "pointer", transition: "all 0.25s",
-                                            padding: "9px 12px",
-                                        }}
-                                        onMouseEnter={e => {
-                                            e.currentTarget.style.borderColor = t.primary;
-                                            e.currentTarget.style.color = t.primary;
-                                        }}
-                                        onMouseLeave={e => {
-                                            e.currentTarget.style.borderColor = t.border;
-                                            e.currentTarget.style.color = t.textDim;
-                                        }}
-                                    >
-                                        <Ic n="logout" s={14} /> {T("Sign Out", "سائن آؤٹ")}
+                                    <button type="button" role="menuitem" onClick={() => toggleLang()}>
+                                        {T("اردو میں دیکھیں", "Switch to English")} <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h7M8 3v2M5 9c1.5 3 4 5 6 6M11 5c-1 4-3 7-6 9M13 21l4-10 4 10M14.5 17h5" /></svg>
                                     </button>
+                                    <button type="button" role="menuitem" onClick={() => toggleTheme()}>
+                                        {isDark ? T("Light mode", "لائٹ موڈ") : T("Dark mode", "ڈارک موڈ")} <Ic n={isDark ? "sun" : "moon"} s={17} />
+                                    </button>
+                                    <div className="cs-menu-sep" />
+                                    <button type="button" role="menuitem" className="danger" onClick={() => { setAcctOpen(false); go("signout"); }}>
+                                        {T("Sign Out", "سائن آؤٹ")} <Ic n="logout" s={17} />
+                                    </button>
+                                </div>
+                            )}
+                            {!isCollapsed ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                    <button type="button" className="cs-me" aria-haspopup="menu" aria-expanded={acctOpen} onClick={() => setAcctOpen(v => !v)}>
+                                        <span className="cs-av">{initials}</span>
+                                        <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                                            <b>{displayName}</b>
+                                            <small>{T("View profile", "پروفائل دیکھیں")}</small>
+                                        </span>
+                                    </button>
+                                    <button type="button" className="cs-bell" aria-label={T("Notifications", "اطلاعات")} onClick={() => setDrawerOpen(true)}>
+                                        <Ic n="bell" s={17} c="currentColor" />
+                                        {unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                                    <button type="button" className="cs-bell" aria-label={T("Notifications", "اطلاعات")} onClick={() => setDrawerOpen(true)}>
+                                        <Ic n="bell" s={17} c="currentColor" />
+                                        {unreadCount > 0 && <b>{unreadCount > 99 ? "99+" : unreadCount}</b>}
+                                    </button>
+                                    <button type="button" className="cs-av" style={{ border: 0, cursor: "pointer" }} aria-haspopup="menu" aria-expanded={acctOpen}
+                                        title={displayName} onClick={() => setAcctOpen(v => !v)}>{initials}</button>
                                 </div>
                             )}
                         </div>

@@ -329,7 +329,7 @@ test("reaching the review step requires a signature", () => {
     // appears to do nothing at the bottom of a scrolled page.
     assert.ok(/const signatureReady = /.test(BUILDER));
     const nav = BUILDER.slice(BUILDER.indexOf("const nav = (n) =>"),
-                              BUILDER.indexOf("const nav = (n) =>") + 900);
+                              BUILDER.indexOf("const nav = (n) =>") + 1600);
     assert.ok(nav.includes("!signatureReady"),
               "nav should refuse to advance past the signature step without one");
 });

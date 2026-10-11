@@ -722,16 +722,18 @@ test("quick requests follow what the document is", async () => {
     assert.ok(askSuggestions("something_else").length > 0);
 });
 
-test("sidebar rows: no box on the open row, and the time shows only on hover", async () => {
+// 2026-10-10: the rows take the lawyer AI sidebar's look (SIDE_ROW_CSS): the open
+// row is marked by data-selected and styled by the scoped CSS, never inline.
+test("sidebar rows: the open row is styled by the sidebar CSS, and the time shows only on hover", async () => {
     const p = await openWorkspace();
     const side = p.container.querySelector('[aria-label="Draft history"]');
     const open = side.querySelector('[data-doc="d1"]').closest("[data-side-row]");
     assert.equal(open.dataset.selected, "true");
-    assert.equal(open.style.background, "", "the open row has no tinted box");
-    assert.ok(!open.style.borderLeft && !open.style.borderRadius, "no accent edge or rounded box");
+    assert.equal(open.style.background, "", "the open row is styled by the sidebar CSS, not inline");
+    assert.ok(open.closest("[data-drafts-side]"), "the row is outside the scoped sidebar");
     const hint = open.querySelector("[data-row-hint]");
     assert.match(hint.textContent, /^Edited /);
-    assert.equal(hint.style.fontSize, "11px", "the time is small");
+    assert.equal(hint.className, "ds-sub", "the time is the small secondary line");
     // Hidden unless the row is hovered or focused -- a stylesheet rule, as :hover needs.
     const css = [...side.querySelectorAll("style")].map(s => s.textContent).join("");
     assert.match(css, /\[data-side-row\] \[data-row-hint\]\{display:none\}/);

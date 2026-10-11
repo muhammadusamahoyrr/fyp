@@ -135,15 +135,16 @@ test("from the Vault: delete moves it to Recently deleted, and Restore brings it
     assert.match(toasts.join(" "), /is back in your Vault/);
 });
 
-test("Create Folder and Upload File have no backend: disabled and labelled, never a working action", async () => {
+test("Upload File has no backend: disabled and labelled; Create Folder is real (2026-10-10)", async () => {
     api.__respond("myDocumentsV2", { data: { items: [ROW], has_more: false } });
     api.__respond("listReviewRequests", { data: null, status: 404, error: { code: "feature_disabled" } });
     const p = await mount(h(DocsVault, { onBack: () => {}, onOpen: () => {} }));
-    for (const label of ["Create Folder", "Upload File"]) {
-        const b = p.container.querySelector(`[data-vault-soon="${label}"]`);
-        assert.ok(b, `${label} is missing`);
-        assert.equal(b.disabled, true, `${label} looks clickable`);
-        assert.match(b.textContent, /Soon/);
-    }
-    assert.equal(p.container.querySelector("#vault-folder"), null, "the folder form led nowhere");
+    const upload = p.container.querySelector('[data-vault-soon="Upload File"]');
+    assert.ok(upload, "Upload File is missing");
+    assert.equal(upload.disabled, true, "Upload File looks clickable");
+    assert.match(upload.textContent, /Soon/);
+    // Folders have a backend for clients too (documents_v2_folders.py): no "Soon".
+    const create = p.container.querySelector("[data-create-folder]");
+    assert.ok(create && !create.disabled, "Create Folder is not offered");
+    assert.equal(p.container.querySelector('[data-vault-soon="Create Folder"]'), null);
 });
