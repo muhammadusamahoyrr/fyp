@@ -291,18 +291,29 @@ function ConfirmFolderDelete({ mode, folder, onConfirm, onClose }) {
     );
 }
 
-function MoveDialog({ mode, row, folders, onMove, onClose }) {
+/* Move one document. "New folder…" (2026-10-10) creates the folder and files
+ * the document into it in one step, so a lawyer with no folder yet is not sent
+ * back out of the dialog to make one first. */
+function MoveDialog({ mode, row, folders, onMove, onCreate, onClose }) {
     const [choice, setChoice] = useState(row.folder_id || "");
     const [busy, setBusy] = useState(false);
     const [problem, setProblem] = useState(null);
+    const [newName, setNewName] = useState(null);           // null: not making a folder
     const submit = async e => {
         e.preventDefault();
         if (busy) return;
         setBusy(true);
-        const issue = await onMove(choice || null);
+        let target = choice || null;
+        if (newName !== null) {
+            const made = await onCreate(newName);
+            if (made.error) { setBusy(false); setProblem(made.error); return; }
+            target = made.folder.id;
+        }
+        const issue = await onMove(target);
         setBusy(false);
         if (issue) setProblem(issue);
     };
+    const making = newName !== null;
     return (
         <VaultDialog mode={mode} busy={busy} onClose={onClose} labelledBy="lvm-title" data-move-dialog>
             <form onSubmit={submit}>
@@ -310,17 +321,167 @@ function MoveDialog({ mode, row, folders, onMove, onClose }) {
                 <fieldset style={{ border: "none", margin: 0, padding: 0, display: "grid", gap: 8, maxHeight: 300, overflowY: "auto" }}>
                     <legend className="lv-sub" style={{ marginBottom: 8 }}>Choose a folder</legend>
                     {[{ id: "", name: "No folder" }, ...folders].map(f => (
-                        <label key={f.id || "none"} className={`lv-opt${choice === f.id ? " on" : ""}`}>
-                            <input type="radio" name="lvm-folder" value={f.id} checked={choice === f.id} onChange={() => setChoice(f.id)} style={{ accentColor: "#3EE0A1" }} />
+                        <label key={f.id || "none"} className={`lv-opt${!making && choice === f.id ? " on" : ""}`}>
+                            <input type="radio" name="lvm-folder" value={f.id} checked={!making && choice === f.id} onChange={() => { setChoice(f.id); setNewName(null); setProblem(null); }} style={{ accentColor: "#3EE0A1" }} />
                             <span style={{ display: "flex", color: f.id ? "var(--gold)" : "var(--faint)" }}>{svg(G.folder, 17)}</span>
                             {f.name}
                         </label>
                     ))}
+                    {making ? (
+                        <label className="lv-opt on" data-move-new-folder>
+                            <span style={{ display: "flex", color: "var(--brand-text)" }}>{svg(G.folderPlus, 17)}</span>
+                            <span style={hidden}>New folder name</span>
+                            <input type="text" autoFocus value={newName} maxLength={60} placeholder="New folder name, e.g. Bail matters"
+                                onChange={e => { setNewName(e.target.value); setProblem(null); }}
+                                style={{ flex: 1, height: 36, border: 0, background: "transparent", boxShadow: "none", padding: 0 }} />
+                        </label>
+                    ) : (
+                        <button type="button" className="lv-opt" data-move-new-folder-start onClick={() => { setNewName(""); setProblem(null); }}
+                            style={{ background: "transparent", color: "var(--brand-text)", fontWeight: 600, width: "100%", textAlign: "left" }}>
+                            {svg(G.plus, 17)} New folder…
+                        </button>
+                    )}
                 </fieldset>
                 {problem && <div role="alert" className="lv-problem">{problem}</div>}
                 <div className="row">
                     <button type="button" className="lv-btn" onClick={onClose} disabled={busy}>Cancel</button>
-                    <button type="submit" className="lv-cta" style={{ height: 42 }} disabled={busy || choice === (row.folder_id || "")}>{busy ? "Moving…" : "Move"}</button>
+                    <button type="submit" className="lv-cta" style={{ height: 42 }}
+                        disabled={busy || (making ? !newName.trim() : choice === (row.folder_id || ""))}>
+                        {busy ? "Moving…" : making ? "Create & move" : "Move"}
+                    </button>
+                </div>
+            </form>
+        </VaultDialog>
+    );
+}
+
+/* ADD DOCUMENTS TO A FOLDER (2026-10-10). A matter has several papers (a plaint,
+ * an affidavit, a notice): filing them one row at a time from "All documents"
+ * took a dialog per document. This lists every one of the lawyer's documents
+ * not already in the folder -- with where each is now -- to pick several at
+ * once. Filing only moves `folder_id` (PUT /documents/v2/{id}/folder): nothing
+ * is copied or deleted, and a document is in one folder at a time. Moves run
+ * one after another; any that fail are named and stay selected. (The client
+ * Vault has its own copy: client/documents/DocsVault.jsx.) */
+const PICK_PAGES = 4;                  // up to 4 × 50 documents, the newest first
+async function loadAllDocuments() {
+    const out = [];
+    let cursor = null;
+    for (let i = 0; i < PICK_PAGES; i += 1) {
+        const res = await myDocumentsV2({ cursor, limit: 50 });
+        if (res?.error) return { error: res.error.message || "Could not load your documents." };
+        out.push(...(res.data?.items || []));
+        cursor = res.data?.has_more ? res.data.next_cursor : null;
+        if (!cursor) return { items: out, more: false };
+    }
+    return { items: out, more: true };
+}
+
+function AddDocumentsDialog({ mode, folder, folderName, fresh = false, onDone, onClose }) {
+    const [list, setList] = useState(null);                 // null: loading
+    const [more, setMore] = useState(false);
+    const [problem, setProblem] = useState(null);
+    const [q, setQ] = useState("");
+    const [picked, setPicked] = useState(() => new Set());
+    const [busy, setBusy] = useState(false);
+    const [progress, setProgress] = useState(0);
+    useEffect(() => {
+        let live = true;
+        loadAllDocuments().then(res => {
+            if (!live) return;
+            if (res.error) { setProblem(res.error); setList([]); return; }
+            setList(res.items.filter(d => d.folder_id !== folder.id));
+            setMore(res.more);
+        });
+        return () => { live = false; };
+    }, [folder.id]);
+    const shown = useMemo(() => {
+        const s = q.trim().toLowerCase();
+        return (list || []).filter(d => !s || (d.title || "").toLowerCase().includes(s)
+            || (d.template_type || "").toLowerCase().includes(s) || (folderName[d.folder_id] || "").toLowerCase().includes(s));
+    }, [list, q, folderName]);
+    const allShown = shown.length > 0 && shown.every(d => picked.has(d.id));
+    const toggle = id => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    const toggleAll = () => setPicked(p => {
+        const n = new Set(p);
+        shown.forEach(d => (allShown ? n.delete(d.id) : n.add(d.id)));
+        return n;
+    });
+    const submit = async e => {
+        e.preventDefault();
+        if (busy || picked.size === 0) return;
+        setBusy(true);
+        setProblem(null);
+        const ids = [...picked];
+        const failed = [];
+        for (let i = 0; i < ids.length; i += 1) {
+            setProgress(i + 1);
+            const res = await moveDocumentToFolderV2(ids[i], folder.id);
+            if (res?.error) failed.push(ids[i]);
+        }
+        setBusy(false);
+        const moved = ids.length - failed.length;
+        if (failed.length) {
+            // The ones that worked leave the list; the failures stay selected to retry.
+            const title = id => (list.find(d => d.id === id)?.title || "Untitled document");
+            setList(l => l.filter(d => !ids.includes(d.id) || failed.includes(d.id)));
+            setPicked(new Set(failed));
+            setProblem(`${failed.length} could not be added: ${failed.map(title).join(", ")}. Try again.`);
+            if (moved) onDone(moved, false);
+            return;
+        }
+        onDone(moved, true);
+    };
+    const n = picked.size;
+    return (
+        <VaultDialog mode={mode} busy={busy} onClose={onClose} labelledBy="lva-title" data-add-documents-dialog style={{ width: "min(560px, calc(100vw - 32px))" }}>
+            <form onSubmit={submit}>
+                <h2 id="lva-title" style={{ marginBottom: 6 }}>{fresh ? `“${folder.name}” is ready. Add documents?` : `Add documents to “${folder.name}”`}</h2>
+                <p className="lv-sub" style={{ margin: "0 0 14px", fontSize: 13.5, lineHeight: 1.55 }}>
+                    Pick the papers that belong to this matter. Each one moves here from where it is now — nothing is copied or deleted.
+                </p>
+                {list === null ? (
+                    <div aria-busy="true" className="lv-empty" style={{ padding: 28 }}>Loading your documents…</div>
+                ) : list.length === 0 && !problem ? (
+                    <div className="lv-empty" style={{ padding: 28 }}>
+                        <b>{fresh ? "No documents to add yet" : "Nothing left to add"}</b>
+                        {fresh ? "Documents you save from Legal drafting appear in your Vault; file them here from there." : "Every one of your documents is already in this folder."}
+                    </div>
+                ) : (<>
+                    <label className="lv-search" style={{ height: 42, marginBottom: 10, boxShadow: "none" }}>
+                        {svg(G.search, 16)}
+                        <span style={hidden}>Search your documents</span>
+                        <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name, type or folder" style={{ fontSize: 14 }} />
+                    </label>
+                    {shown.length > 0 && (
+                        <label className="lv-opt" style={{ minHeight: 38, marginBottom: 8, borderStyle: "dashed" }}>
+                            <input type="checkbox" checked={allShown} onChange={toggleAll} style={{ accentColor: "#3EE0A1" }} data-add-all />
+                            <span style={{ fontWeight: 600 }}>{allShown ? "Clear the ones shown" : `Select all shown (${shown.length})`}</span>
+                        </label>
+                    )}
+                    <div role="group" aria-label="Your documents" style={{ display: "grid", gap: 8, maxHeight: 300, overflowY: "auto", paddingRight: 2 }} data-lenis-prevent>
+                        {shown.map(d => (
+                            <label key={d.id} className={`lv-opt${picked.has(d.id) ? " on" : ""}`} data-add-doc={d.id} style={{ minHeight: 54 }}>
+                                <input type="checkbox" checked={picked.has(d.id)} onChange={() => toggle(d.id)} style={{ accentColor: "#3EE0A1" }} />
+                                <span className="lv-pdf" aria-hidden="true" style={{ width: 26, height: 32, fontSize: 8 }}>PDF</span>
+                                <span style={{ minWidth: 0, flex: 1 }}>
+                                    <span style={{ display: "block", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title || "Untitled document"}</span>
+                                    <span className="lv-sub">
+                                        {d.template_type ? humanise(d.template_type) : "Document"} · {folderName[d.folder_id] ? `now in “${folderName[d.folder_id]}”` : "no folder"}
+                                    </span>
+                                </span>
+                            </label>
+                        ))}
+                        {shown.length === 0 && <div className="lv-sub" style={{ padding: 12 }}>No document matches “{q}”.</div>}
+                    </div>
+                    {more && <div className="lv-sub" style={{ marginTop: 8 }}>Showing your {list.length} newest documents.</div>}
+                </>)}
+                {problem && <div role="alert" className="lv-problem">{problem}</div>}
+                <div className="row">
+                    <button type="button" className="lv-btn" onClick={onClose} disabled={busy}>{fresh ? "Skip for now" : "Cancel"}</button>
+                    <button type="submit" className="lv-cta" style={{ height: 42 }} disabled={busy || n === 0} data-add-submit>
+                        {busy ? `Adding ${progress} of ${n}…` : n ? `Add ${n} document${n === 1 ? "" : "s"}` : "Add documents"}
+                    </button>
                 </div>
             </form>
         </VaultDialog>
@@ -398,13 +559,32 @@ function VaultScreen() {
     };
     const openFolder = f => { setFolder(f); setTab("all"); };
 
+    // A new folder opens at once, with the picker to fill it: a folder is made
+    // to hold a matter's papers, so that is the next step, not a hunt for rows.
     const createFolder = async name => {
         const res = await createDocumentFolderV2(name);
         if (res?.error) return res.error.message || "Could not create the folder.";
         setNaming(null);
-        toast.show(`Folder “${res.data.name}” created.`, "success", 2500);
         await loadFolders();
+        openFolder(res.data);
+        setAdding({ folder: res.data, fresh: true });
         return null;
+    };
+    // "New folder…" inside the Move dialog: make it, then the dialog files into it.
+    const createForMove = async name => {
+        const res = await createDocumentFolderV2(name);
+        if (res?.error) return { error: res.error.message || "Could not create the folder." };
+        justMade.current[res.data.id] = res.data.name;      // named in the toast before the list re-reads
+        setFolders(fs => [...fs, res.data]);
+        return { folder: res.data };
+    };
+    const [adding, setAdding] = useState(null);             // { folder, fresh } while the picker is open
+    const justMade = useRef({});
+    const added = (folderFor, n, close) => {
+        toast.show(`Added ${n} document${n === 1 ? "" : "s"} to “${folderFor.name}”.`, "success", 3000);
+        if (close) setAdding(null);
+        docs.reload();
+        loadFolders();
     };
     const renameFolder = async (f, name) => {
         const res = await renameDocumentFolderV2(f.id, name);
@@ -427,7 +607,7 @@ function VaultScreen() {
         const res = await moveDocumentToFolderV2(row.id, folderId);
         if (res?.error) return res.error.message || "Could not move the document.";
         setMoving(null);
-        toast.show(folderId ? `Moved to “${folderName[folderId]}”.` : "Moved out of its folder.", "success", 2500);
+        toast.show(folderId ? `Moved to “${folderName[folderId] || justMade.current[folderId] || "the folder"}”.` : "Moved out of its folder.", "success", 2500);
         docs.reload();
         await loadFolders();
         return null;
@@ -515,6 +695,8 @@ function VaultScreen() {
                             <div data-folder-filter className="lv-filter">
                                 <span style={{ color: "var(--gold)", display: "flex" }}>{svg(G.folder, 16)}</span>
                                 Showing the folder <b>{folder.name}</b>
+                                <button type="button" className="lv-cta" style={{ height: 32, padding: "0 12px", fontSize: 13, borderRadius: 10 }} data-add-documents
+                                    onClick={() => setAdding({ folder, fresh: false })}>{svg(G.plus, 15)} Add documents</button>
                                 <button type="button" className="lv-btn" style={{ height: 32, fontSize: 13 }} onClick={() => setFolder(null)}>Show all</button>
                             </div>
                         )}
@@ -538,6 +720,7 @@ function VaultScreen() {
                                             </span>
                                         </button>
                                         <div className="lv-acts">
+                                            <button type="button" className="lv-ib k-move" aria-label={`Add documents to ${f.name}`} title="Add documents" data-add-to-folder={f.id} onClick={() => setAdding({ folder: f, fresh: false })}>{svg(G.plus, 16)}</button>
                                             <button type="button" className="lv-ib k-pen" aria-label={`Rename folder ${f.name}`} title="Rename" data-rename-folder={f.id} onClick={() => setNaming({ mode: "rename", folder: f })}>{svg(G.pencil, 16)}</button>
                                             <button type="button" className="lv-ib danger k-trash" aria-label={`Delete folder ${f.name}`} title="Delete folder" data-delete-folder={f.id} onClick={() => setRemovingFolder(f)}>{svg(G.trash, 16)}</button>
                                         </div>
@@ -547,7 +730,7 @@ function VaultScreen() {
                                     <span>{svg(G.plus, 18)}</span> New folder
                                 </button>
                                 {folders.length === 0 && (
-                                    <div style={{ gridColumn: "1 / -1", color: "var(--muted)", fontSize: 13.5 }}>No folders yet. Create one, then move documents into it from “All documents”.</div>
+                                    <div style={{ gridColumn: "1 / -1", color: "var(--muted)", fontSize: 13.5 }}>No folders yet. Make one for each matter — a client, a case, a court — and add its documents in one go.</div>
                                 )}
                             </div>
                         )
@@ -559,8 +742,13 @@ function VaultScreen() {
                         <div className="lv-empty">
                             <span className="lv-ic" style={{ "--c": "var(--brand-text)", width: 56, height: 56, margin: "0 auto", borderRadius: 16 }}>{svg(G.folder, 26)}</span>
                             <b>{folder ? `“${folder.name}” is empty` : "Your vault is empty"}</b>
-                            {folder ? "Move documents here from “All documents”." : "Documents you save from Legal drafting with “Save to Documents” appear here."}
-                            {folder && <div style={{ marginTop: 14 }}><button type="button" className="lv-btn" onClick={() => setFolder(null)}>Show all documents</button></div>}
+                            {folder ? "Add the documents that belong to this matter. They move here; nothing is copied." : "Documents you save from Legal drafting with “Save to Documents” appear here."}
+                            {folder && (
+                                <div style={{ marginTop: 14, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                                    <button type="button" className="lv-cta" style={{ height: 42 }} data-add-documents-empty onClick={() => setAdding({ folder, fresh: false })}>{svg(G.plus, 17)} Add documents</button>
+                                    <button type="button" className="lv-btn" onClick={() => setFolder(null)}>Show all documents</button>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div>
@@ -624,7 +812,11 @@ function VaultScreen() {
             {removingFolder && (
                 <ConfirmFolderDelete mode={mode} folder={removingFolder} onConfirm={() => deleteFolder(removingFolder)} onClose={() => setRemovingFolder(null)} />
             )}
-            {moving && <MoveDialog mode={mode} row={moving} folders={folders} onMove={id => moveRow(moving, id)} onClose={() => setMoving(null)} />}
+            {moving && <MoveDialog mode={mode} row={moving} folders={folders} onMove={id => moveRow(moving, id)} onCreate={createForMove} onClose={() => setMoving(null)} />}
+            {adding && (
+                <AddDocumentsDialog mode={mode} folder={adding.folder} fresh={adding.fresh} folderName={folderName}
+                    onDone={(n, close) => added(adding.folder, n, close)} onClose={() => setAdding(null)} />
+            )}
             {deleting && (
                 <DeleteDocumentDialog row={deleting} onClose={() => setDeleting(null)}
                     onDeleted={() => {

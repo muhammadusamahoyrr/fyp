@@ -8,6 +8,7 @@ import { useAuth } from "@/context/AuthContext.jsx";
 import { listAgreements, getAgreement, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
 import SignaturePad from "./SignaturePad.jsx";
 import { DraftComposer } from "./DraftComposer.jsx";
+import AgreementBody from "@/components/shared/AgreementBody.jsx";
 
 const PAGE_SIZE = 25;
 
@@ -139,7 +140,7 @@ export function AgreementsPage() {
                      error: error?.message || "This agreement could not be loaded." });
             return;
         }
-        setDoc({ loading: false, body: data.body_html ?? "",
+        setDoc({ loading: false, body: data.body_html ?? "", format: data.body_format,
                  eto: data.eto_classification, error: null });
     }, [user?.full_name]);
 
@@ -369,9 +370,10 @@ export function AgreementsPage() {
                                     </div>
                                 </div>
                             ) : (
-                                <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
-                                    {doc?.body ? doc.body : "No content."}
-                                </div>
+                                // Plain text exactly as before; a client's rich
+                                // (html) agreement shown formatted. 2026-10-11.
+                                <AgreementBody body={doc?.body} format={doc?.format}
+                                    style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, fontFamily: "Georgia,serif" }} />
                             )}
 
                             {/* Only once EXECUTED. There is no document to

@@ -297,7 +297,7 @@ test("every chip's count equals the rows its view renders", async () => {
         const rows = view.container.querySelectorAll("[data-row]").length;
         assert.equal(chipN(view, name), rows, `${name}: chip says ${chipN(view, name)}, ${rows} rows shown`);
     }
-    await click(allButtons(view.container).find(b => b.textContent.trim().startsWith("History")));
+    await click(allButtons(view.container).find(b => b.getAttribute("role") === "tab" && b.textContent.trim().startsWith("Closed")));
     assert.equal(view.container.querySelectorAll("[data-row]").length, 1);
     await view.unmount();
 });

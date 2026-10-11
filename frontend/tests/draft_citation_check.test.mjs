@@ -102,14 +102,11 @@ async function mountWithDraft(draft) {
     };
     await click(byText(/My Drafts/));
     await click(byText(/^\s*Open\s*$/));
-    const strip = () => container.querySelector("[data-citation-strip]");
+    // The drafter shows the check only as a warning, and only for a real
+    // finding (2026-10-11): an authority not found, or repealed.
+    const warning = () => container.querySelector("[data-citation-warning]");
     return {
-        settle, click, byText, strip,
-        draftText: () => strip().querySelector('[data-check="draft"]').textContent,
-        isStale: () => Boolean(strip().querySelector("[data-stale]")),
-        documentCheck: () => strip().querySelector('[data-check="document"]'),
-        publishButton: () => [...container.querySelectorAll("button")]
-            .find(b => /hashed copy/.test(b.title || "")),
+        settle, click, byText, warning,
         async type() {
             const ed = container.querySelector("[contenteditable]");
             await act(async () => {
@@ -133,58 +130,52 @@ test.beforeEach(() => {
 
 test.after(() => { dom.window.close(); });
 
-test("a reopened draft shows the check stored with it", async () => {
+test("a reopened draft with a missing authority warns about it", async () => {
     const p = await mountWithDraft(DRAFT);
-    assert.match(p.draftText(), /2 not found in the corpus/);
-    assert.equal(p.isStale(), false);
+    assert.match(p.warning().textContent, /2 not found in the corpus/);
     await p.unmount();
 });
 
-test("editing marks the stored check out of date", async () => {
+test("editing removes the warning: it was about other words", async () => {
     const p = await mountWithDraft(DRAFT);
     await p.type();
-    assert.equal(p.isStale(), true);
-    assert.match(p.draftText(), /out of date/);
+    assert.equal(p.warning(), null);
     await p.unmount();
 });
 
-test("saving replaces the check and clears the stale mark", async () => {
+test("saving clean text clears the warning", async () => {
     api.__respond("saveDocDraft", { data: { id: "draft-1", verification: CLEAN } });
     const p = await mountWithDraft(DRAFT);
-    await p.type();
     await p.click(p.byText(/Save Draft/));
-    assert.equal(p.isStale(), false);
-    assert.match(p.draftText(), /2 of 2 found/);
+    assert.equal(p.warning(), null);
     await p.unmount();
 });
 
-test("an edit made while a save is in flight keeps the check stale", async () => {
+test("a save that finds a missing authority warns", async () => {
+    api.__respond("saveDocDraft", { data: { id: "draft-1", verification: FLAGGED } });
+    const p = await mountWithDraft({ ...DRAFT, verification: CLEAN });
+    assert.equal(p.warning(), null);
+    await p.click(p.byText(/Save Draft/));
+    assert.match(p.warning().textContent, /not found in the corpus/);
+    await p.unmount();
+});
+
+test("an edit made while a save is in flight shows no stale warning", async () => {
     let page;
     api.__respond("saveDocDraft", async () => {
         await page.type();   // the lawyer keeps typing before the answer lands
-        return { data: { id: "draft-1", verification: CLEAN } };
+        return { data: { id: "draft-1", verification: FLAGGED } };
     });
-    page = await mountWithDraft(DRAFT);
+    page = await mountWithDraft({ ...DRAFT, verification: CLEAN });
     await page.click(page.byText(/Save Draft/));
-    assert.equal(page.isStale(), true, "a check of the OLD text was shown as current");
+    assert.equal(page.warning(), null, "a check of the OLD text was shown as current");
     await page.unmount();
 });
 
-test("the copy saved to Documents shows its own frozen check, separately", async () => {
-    api.__respond("publishDraftAsDocumentV2", {
-        docId: "doc-1", revisionId: "r1", pdfSha256: "h", verification: CLEAN });
-    const p = await mountWithDraft(DRAFT);
-    assert.equal(p.documentCheck(), null);
-    await p.click(p.publishButton());
-    assert.match(p.documentCheck().textContent, /frozen/i);
-    assert.match(p.documentCheck().textContent, /2 of 2 found/);
-    // The draft's own check is untouched by publishing.
-    assert.match(p.draftText(), /2 not found in the corpus/);
-    await p.unmount();
-});
-
-test("a draft saved before checks existed says so instead of showing a pass", async () => {
-    const p = await mountWithDraft({ ...DRAFT, verification: undefined });
-    assert.match(p.draftText(), /not checked yet/);
-    await p.unmount();
+test("an unchecked or clean draft shows nothing -- and nothing claims a pass", async () => {
+    for (const verification of [undefined, CLEAN]) {
+        const p = await mountWithDraft({ ...DRAFT, verification });
+        assert.equal(p.warning(), null);
+        await p.unmount();
+    }
 });

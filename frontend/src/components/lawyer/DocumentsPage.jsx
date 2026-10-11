@@ -3,16 +3,17 @@
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
-import { Btn, Input } from "./components.jsx";
 import RevisionHistory from "./RevisionHistory.jsx";
+import ReviewPdfView, { REVIEW_PDF_CSS, ViewToolsButton } from "./ReviewPdfView.jsx";
+import ReviewEditor, { REVIEW_EDITOR_CSS } from "./ReviewEditor.jsx";
 import { Icon, I } from "./icons.jsx";
 import { DRAFTING_TOKENS_CSS, draftingMode } from "./draftingTheme.js";
 import {
     listReviewQueue, reviewDocument, downloadDocumentFile,
-    fetchRevisionPreview, reviewDocumentV2, reviewQueueV2,
+    fetchRevisionPreview, reviewDocumentV2, reviewQueueV2, getReviewTextV2, returnWithEditsV2,
     idempotencyKey, errorCode,
+    quickReviewInbox, acceptQuickReview, declineQuickReview,
 } from "@/lib/api.js";
-import { useAuth } from "@/context/AuthContext.jsx";
 import { createGeneration } from "@/lib/attempt.js";
 import { onNotification } from "@/lib/notificationTarget.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
@@ -29,116 +30,6 @@ const _CASE_TYPE_MAP = { civil: "Civil", criminal: "Criminal", family: "Family",
 // (The DOC_CONTENT placeholder plaint was removed: the review and final screens
 // render the REAL generated PDF inline, pinned to the submitted revision via
 // fetchRevisionPreview so the page and the decision are about the same bytes.)
-
-const STEPS = [
-    { id: "inbox", label: "Document Inbox", icon: "📥" },
-    { id: "review", label: "Review & Validate", icon: "✏️" },
-    { id: "decision", label: "Decision & Notify", icon: "⚖️" },
-    { id: "final", label: "Final & Export", icon: "📤" },
-];
-const STEP_IDX = { inbox: 0, review: 1, decision: 2, final: 3 };
-
-const STATUS_COLOR = {
-    "Pending Review": { dot: "#FFC857", badge: "rgba(255,200,87,0.15)", text: "#FFC857", border: "rgba(255,200,87,0.3)" },
-    "Under Review": { dot: "#5AB3FF", badge: "rgba(90,179,255,0.15)", text: "#5AB3FF", border: "rgba(90,179,255,0.3)" },
-    "Approved": { dot: "#4DD4A3", badge: "rgba(77,212,163,0.15)", text: "#4DD4A3", border: "rgba(77,212,163,0.3)" },
-    "Returned": { dot: "#FFC857", badge: "rgba(255,200,87,0.15)", text: "#FFC857", border: "rgba(255,200,87,0.3)" },
-    "Rejected": { dot: "#FF6B7A", badge: "rgba(255,107,122,0.15)", text: "#FF6B7A", border: "rgba(255,107,122,0.3)" },
-    "Final": { dot: "#40F0DC", badge: "rgba(64,240,220,0.15)", text: "#40F0DC", border: "rgba(64,240,220,0.3)" },
-};
-const URGENCY_COLOR = { Normal: "#9A9A94", Priority: "#FFC857", Urgent: "#FF6B7A" };
-
-// ─── SMALL HELPERS ────────────────────────────────────────────
-const Avatar = ({ name, size = 34, t }) => {
-    const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-    return (
-        <div style={{
-            width: size, height: size, borderRadius: "50%", background: `${t.primary}25`,
-            border: `1.5px solid ${t.primary}50`, display: "flex", alignItems: "center",
-            justifyContent: "center", fontSize: size * 0.35, fontWeight: 700, color: t.primary,
-            flexShrink: 0, fontFamily: "DM Sans,system-ui"
-        }}>
-            {initials}
-        </div>
-    );
-};
-
-const StatusPill = ({ status, t }) => {
-    const s = STATUS_COLOR[status] || STATUS_COLOR["Under Review"];
-    return (
-        <span style={{
-            display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px",
-            borderRadius: 20, background: s.badge, color: s.text, border: `1px solid ${s.border}`,
-            fontSize: 11, fontWeight: 700, whiteSpace: "nowrap"
-        }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.dot, flexShrink: 0 }} />
-            {status}
-        </span>
-    );
-};
-
-const UrgencyBadge = ({ urgency }) => (
-    <span style={{
-        fontSize: 10, padding: "2px 7px", borderRadius: 6, fontWeight: 700,
-        background: `${URGENCY_COLOR[urgency]}18`, color: URGENCY_COLOR[urgency],
-        border: `1px solid ${URGENCY_COLOR[urgency]}35`, whiteSpace: "nowrap"
-    }}>
-        {urgency === "Urgent" ? "🔴" : urgency === "Priority" ? "🟡" : "🟢"} {urgency}
-    </span>
-);
-
-
-
-// ─── TOP STEPPER ──────────────────────────────────────────────
-function Stepper({ step, t }) {
-    const active = STEP_IDX[step];
-    return (
-        <div style={{
-            display: "flex", alignItems: "center", padding: "12px 28px",
-            background: "transparent", flexShrink: 0
-        }}>
-            {STEPS.map((s, i) => {
-                const done = i < active, cur = i === active;
-                return (
-                    <div key={s.id} style={{
-                        display: "flex", alignItems: "center",
-                        flex: i < STEPS.length - 1 ? 1 : undefined
-                    }}>
-                        {/* Step node: icon circle + label inline when active */}
-                        <div style={{ display: "flex", alignItems: "center", gap: cur ? 8 : 0, flexShrink: 0 }}>
-                            <div style={{
-                                width: 34, height: 34, borderRadius: "50%",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                border: `2px solid ${done || cur ? t.primary : t.border}`,
-                                background: done ? t.primary : cur ? t.primaryGlow2 : "transparent",
-                                color: done ? (t.mode === "dark" ? "#111E24" : "#fff") : cur ? t.primary : t.textFaint,
-                                fontSize: 14, transition: "all .22s", flexShrink: 0,
-                                boxShadow: cur ? `0 0 0 3px ${t.primary}25` : "none"
-                            }}>
-                                {done ? "✓" : s.icon}
-                            </div>
-                            {cur && (
-                                <span style={{
-                                    fontSize: 12, fontWeight: 700, color: t.primary,
-                                    whiteSpace: "nowrap", letterSpacing: "0.01em"
-                                }}>
-                                    {s.label}
-                                </span>
-                            )}
-                        </div>
-                        {i < STEPS.length - 1 && (
-                            <div style={{
-                                flex: 1, height: 1.5, margin: "0 10px",
-                                background: done ? t.primary : t.border,
-                                transition: "background .22s", borderRadius: 2
-                            }} />
-                        )}
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
 
 // ═══════════════════════════════════════════════════════════════
 // SCREEN 1 — DOCUMENT INBOX
@@ -234,6 +125,10 @@ export const INBOX_CSS = `[data-review-inbox]{flex:1;min-height:0;overflow-y:aut
 [data-review-inbox] .ri-row:hover .ri-av{background:var(--brand-solid);color:var(--on-brand)}
 [data-review-inbox] .ri-row::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--stripe,transparent)}
 [data-review-inbox] .ri-title{font:600 16.5px/1.3 "Literata",Georgia,serif}
+[data-review-inbox] .ri-quick{border-color:color-mix(in srgb,var(--gold) 45%,var(--line))}
+[data-review-inbox] .ri-quick .ri-grid{border-bottom:1px solid var(--line)}
+[data-review-inbox] .ri-quick .ri-grid:last-child{border-bottom:0}
+[data-review-inbox] .ri-qr{background:color-mix(in srgb,var(--gold) 16%,transparent);color:var(--gold)}
 [data-review-inbox] .ri-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
 [data-review-inbox] .ri-note{margin-top:5px;font-size:13px;font-style:italic;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50ch}
 [data-review-inbox] .ri-client{display:flex;align-items:center;gap:10px;min-width:0}
@@ -331,9 +226,65 @@ const EMPTY = {
     "Rejected": ["Nothing rejected", "Documents you decline are listed here."],
 };
 
+const _rupees = n => (n == null ? "—" : `Rs ${Number(n).toLocaleString("en-PK")}`);
+const _hoursLeft = iso => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 3600000));
+
+/* QUICK REVIEW REQUESTS (2026-10-11): clients who have not hired this lawyer,
+ * asking for one document to be checked. Only the title, the client and their
+ * note are shown -- the document opens once the lawyer accepts, and then it is
+ * an ordinary Pending Review row. */
+function QuickRequests({ items, busyId, onAccept, onDecline }) {
+    if (!items?.length) return null;
+    return (
+        <section className="ri-card ri-quick" data-quick-requests aria-label="New review requests">
+            <div className="ri-bar">
+                <div>
+                    <h2>New review requests <span className="ri-mono" style={{ color: "var(--muted)", fontSize: 14 }}>· {items.length}</span></h2>
+                    <small>Clients who haven't hired you, asking for one document to be checked. You see the document once you accept.</small>
+                </div>
+            </div>
+            {items.map(r => {
+                const initials = (r.client_name || "?").split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                const left = _hoursLeft(r.expires_at);
+                return (
+                    <div key={r.id} className="ri-grid" data-quick-request={r.id} style={{ gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.3fr) 170px 250px" }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                <span className="ri-title">{r.doc_title}</span>
+                                <span className="ri-pill ri-qr">Quick review</span>
+                            </div>
+                            <div className="ri-sub">{_TMPL_MAP[r.template_type] || r.template_type || "Document"} · v{r.version}</div>
+                            {r.note && <div className="ri-note" title={r.note}>“{r.note}”</div>}
+                        </div>
+                        <div className="ri-client">
+                            <span className="ri-av" aria-hidden="true">{initials}</span>
+                            <span style={{ minWidth: 0 }}>
+                                <span style={{ display: "block", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.client_name}</span>
+                                <span className={`ri-wait${left <= 3 ? " late" : ""}`} style={{ display: "block" }}>Accept within {left}h</span>
+                            </span>
+                        </div>
+                        <div>
+                            <div style={{ fontWeight: 700 }}>{_rupees(r.fee_pkr)}</div>
+                            <div className="ri-sub">Due {r.turnaround_hours}h after accepting</div>
+                        </div>
+                        <span style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                            <button type="button" className="ri-btn" style={{ height: 36 }} disabled={busyId === r.id}
+                                data-quick-decline onClick={() => onDecline(r)}>Decline</button>
+                            <button type="button" className="ri-btn primary" style={{ height: 36 }} disabled={busyId === r.id}
+                                data-quick-accept onClick={() => onAccept(r)}>
+                                <Icon d={I.eye} size={15} />{busyId === r.id ? "Opening…" : "Accept & open"}</button>
+                        </span>
+                    </div>
+                );
+            })}
+        </section>
+    );
+}
+
 function ScreenInbox({
     t, onOpen, docs, loading, hasMore, loadingMore, onLoadMore,
     statusF, onStatusChange, counts, serverFiltered,
+    quick = null, quickBusy = null, onAcceptQuick, onDeclineQuick,
 }) {
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState("all");
@@ -385,6 +336,8 @@ function ScreenInbox({
                         <Icon d={I.sparkles} size={18} /> AI Generate
                     </button>
                 </div>
+
+                <QuickRequests items={quick} busyId={quickBusy} onAccept={onAcceptQuick} onDecline={onDeclineQuick} />
 
                 {/* THE FILTERS ARE THE COUNTS: one control, each number shown once.
                     Values go through _tabCount, like everything else here: `counts`
@@ -458,6 +411,7 @@ function ScreenInbox({
                                     <div style={{ minWidth: 0 }}>
                                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                             <span className="ri-title">{doc.title}</span>
+                                            {doc.quickReview && <span data-quick-row className="ri-pill ri-qr" title="A one-off review: this client has not hired you">Quick review</span>}
                                             {doc.textEdited && <span data-wording-edited className="ri-pill ri-edited" title="The client edited this document's wording">
                                                 <Icon d={I.edit} size={12} />Wording edited</span>}
                                         </div>
@@ -469,7 +423,7 @@ function ScreenInbox({
                                         <span className="ri-av" aria-hidden="true">{initials}</span>
                                         <span style={{ minWidth: 0 }}>
                                             <span style={{ display: "block", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{doc.client}</span>
-                                            <span className="ri-sub" style={{ display: "block" }}>{doc.caseId && doc.caseId !== "—" ? <span className="ri-mono">{doc.caseId}</span> : "No case linked"}</span>
+                                            <span className="ri-sub" style={{ display: "block" }}>{doc.caseId && doc.caseId !== "—" ? <span className="ri-mono">{doc.caseId}</span> : doc.quickReview ? "Review only · no case" : "No case linked"}</span>
                                         </span>
                                     </div>
                                     <div>
@@ -526,7 +480,144 @@ function ScreenInbox({
 /* The revision-bound PDF download, with its failure said out loud.
    downloadDocumentFile resolves with { error: <string> } instead of throwing,
    and both screens ignored it: a failed download did nothing at all. */
-function DownloadPdfButton({ doc, t, style }) {
+/* THE REVIEW WORKSPACE (2026-10-11), in the drafting theme the inbox uses.
+ *
+ * Review and decision are ONE screen now. The decision used to be a second
+ * step that took the document off the screen, so a lawyer chose Approve,
+ * Return or Reject without the text in front of them. The document stays
+ * on the left; the decision lives at the foot of the right-hand column.
+ * Scoped by [data-review-ws]; the tokens are DRAFTING_TOKENS_CSS. */
+const REVIEW_CSS = `[data-review-ws]{flex:1;min-height:0;overflow-y:auto;background:radial-gradient(900px 360px at 25% -80px,var(--glow),transparent 70%) no-repeat,var(--bg);color:var(--ink);font:15px/1.5 "Hanken Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+[data-review-ws] *{box-sizing:border-box}
+[data-review-ws] button,[data-review-ws] textarea{font:inherit;color:inherit}
+[data-review-ws] :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+[data-review-ws] .rw-wrap{max-width:1440px;margin:0 auto;padding:20px clamp(16px,2.6vw,32px) 36px;display:flex;flex-direction:column;gap:16px}
+[data-review-ws] .rw-crumbs{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+[data-review-ws] .rw-back{width:42px;height:42px;flex:none;margin-top:2px;display:grid;place-items:center;border-radius:50%;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);cursor:pointer;transition:background .2s,border-color .2s,color .2s,transform .12s}
+[data-review-ws] .rw-back svg{transition:transform .2s}
+[data-review-ws] .rw-back:hover{background:var(--brand-solid);border-color:transparent;color:var(--on-brand)}
+[data-review-ws] .rw-back:hover svg{transform:translateX(-3px)}
+[data-review-ws] .rw-back:active{transform:scale(.93)}
+[data-review-ws] .rw-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:60;width:min(380px,90vw);max-height:70vh;overflow-y:auto;padding:14px 16px;border-radius:16px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 24px 48px -18px rgba(0,0,0,.8);text-align:left}
+[data-review-ws] .rw-crumbs button{border:0;background:none;padding:0;color:var(--muted);cursor:pointer}
+[data-review-ws] .rw-crumbs button:hover{color:var(--hover-ink)}
+[data-review-ws] .rw-crumbs b{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40ch}
+[data-review-ws] .rw-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+[data-review-ws] .rw-head > :first-child{flex:1 1 auto}
+[data-review-ws] .rw-head-right{display:flex;align-items:flex-start;gap:10px;flex:none;padding-top:4px}
+[data-review-ws] .rw-btn.rw-icon-btn{width:40px;padding:0}
+[data-review-ws] .rw-btn.rw-dl{border:0;background:var(--brand-solid);color:var(--on-brand);box-shadow:0 8px 18px -10px rgba(46,196,214,.8)}
+[data-review-ws] .rw-btn.rw-dl:hover:not(:disabled){background:var(--brand-solid-hover);color:var(--on-brand);transform:translateY(-1px)}
+[data-review-ws] .rw-btn.rw-dl:hover svg{animation:rw-drop .6s ease}
+@keyframes rw-drop{0%,100%{transform:none}45%{transform:translateY(3px)}}
+[data-review-ws] .rw-btn.rw-next{gap:0;padding:0 10px 0 12px;transition:background .2s,border-color .2s,color .2s,padding .25s}
+[data-review-ws] .rw-next-label{max-width:0;overflow:hidden;opacity:0;white-space:nowrap;transition:max-width .3s ease,opacity .2s,margin .3s}
+[data-review-ws] .rw-next-count{min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;border-radius:999px;background:color-mix(in srgb,var(--gold) 22%,transparent);color:var(--gold);font-size:12px;font-weight:700}
+[data-review-ws] .rw-next-arrow{display:grid;place-items:center;margin-left:8px}
+[data-review-ws] .rw-prev .rw-next-arrow{margin:0 0 0 -2px}
+[data-review-ws] .rw-prev:hover .rw-next-label,[data-review-ws] .rw-prev:focus-visible .rw-next-label{margin:0 0 0 10px}
+[data-review-ws] .rw-prev:hover .rw-next-arrow{animation-name:rw-nudge-back}
+@keyframes rw-nudge-back{0%,100%{transform:translateX(0)}50%{transform:translateX(-4px)}}
+[data-review-ws] .rw-btn.rw-next:hover:not(:disabled),[data-review-ws] .rw-btn.rw-next:focus-visible{padding:0 14px 0 16px;border-color:transparent;background:var(--brand-solid);color:var(--on-brand)}
+[data-review-ws] .rw-next:hover .rw-next-label,[data-review-ws] .rw-next:focus-visible .rw-next-label{max-width:140px;opacity:1;margin-right:10px}
+[data-review-ws] .rw-next:hover .rw-next-count,[data-review-ws] .rw-next:focus-visible .rw-next-count{background:rgba(4,33,42,.18);color:var(--on-brand)}
+[data-review-ws] .rw-next:hover .rw-next-arrow{animation:rw-nudge .9s ease-in-out infinite}
+@keyframes rw-nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+@media (prefers-reduced-motion:reduce){[data-review-ws] .rw-next-arrow,[data-review-ws] .rw-dl svg{animation:none!important}}
+[data-review-ws] .rw-icon-btn svg{flex:none}
+[data-review-ws] .rw-icon-btn:disabled{opacity:.55;cursor:default}
+[data-review-ws] .rw-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[data-review-ws] .rw-head h1{margin:6px 0 0;font:600 clamp(22px,2.4vw,28px)/1.15 "Literata",Georgia,serif;letter-spacing:-.01em}
+[data-review-ws] .rw-meta{display:flex;flex-wrap:nowrap;align-items:center;gap:6px 9px;margin-top:8px;font-size:13.5px;color:var(--muted);white-space:nowrap;min-width:0}
+[data-review-ws] .rw-meta > span:not(.rw-pill){overflow:hidden;text-overflow:ellipsis;min-width:0}
+[data-review-ws] .rw-head > :first-child, [data-review-ws] .rw-head > :first-child > div{min-width:0}
+[data-review-ws] .rw-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+[data-review-ws] .rw-pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
+[data-review-ws] .rw-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);font-weight:600;font-size:14px;white-space:nowrap;cursor:pointer;transition:border-color .15s,background .15s,color .15s}
+[data-review-ws] .rw-btn:hover:not(:disabled){border-color:var(--hover-line);background:var(--hover-tint);color:var(--hover-ink)}
+[data-review-ws] .rw-btn:disabled{opacity:.55;cursor:default}
+[data-review-ws] .rw-cta{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:48px;padding:0 22px;border-radius:14px;border:0;background:var(--brand-solid);color:var(--on-brand);font-weight:700;font-size:15px;cursor:pointer;box-shadow:0 10px 24px -12px rgba(46,196,214,.8);transition:transform .15s,box-shadow .15s}
+[data-review-ws] .rw-cta:hover:not(:disabled){background:var(--brand-solid-hover);transform:translateY(-1px)}
+[data-review-ws] .rw-cta:disabled{opacity:.55;cursor:default;transform:none}
+[data-review-ws] .rw-cta.gold{background:var(--gold);color:#2a1d00;box-shadow:0 10px 24px -12px rgba(242,195,94,.7)}
+[data-review-ws] .rw-cta.danger{background:var(--danger);color:#2a0c08;box-shadow:none}
+[data-review-ws] .rw-grid{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:18px;align-items:start}
+@media (max-width:1100px){[data-review-ws] .rw-grid{grid-template-columns:1fr}}
+[data-review-ws] .rw-card{border-radius:16px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow-rest)}
+[data-review-ws] .rw-doc{overflow:hidden}
+[data-review-ws] .rw-doc-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+[data-review-ws] .rw-mono{font-family:"JetBrains Mono",monospace;font-size:12.5px}
+[data-review-ws] .rw-side{display:flex;flex-direction:column;gap:14px}
+[data-review-ws] .rw-sec{padding:14px 16px}
+[data-review-ws] .rw-h{margin:0;font:600 16.5px/1.25 "Literata",Georgia,serif}
+[data-review-ws] .rw-kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;font-size:13.5px;border-top:1px solid var(--line)}
+[data-review-ws] .rw-kv span{color:var(--muted)}
+[data-review-ws] .rw-kv b{font-weight:600;text-align:right}
+[data-review-ws] .rw-asked{border-color:color-mix(in srgb,var(--gold) 38%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--gold) 9%,var(--surface)),var(--surface))}
+[data-review-ws] .rw-asked small{display:block;font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--gold)}
+[data-review-ws] .rw-asked p{margin:6px 0 0;font-size:13.5px;font-style:italic;color:var(--ink);line-height:1.55}
+[data-review-ws] .rw-flag{border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+[data-review-ws] .rw-flag b{display:block;font-size:13.5px;margin-bottom:4px}
+[data-review-ws] .rw-flag p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.55}
+[data-review-ws] details{border-top:1px solid var(--line);padding:9px 0}
+[data-review-ws] details summary{display:flex;align-items:center;justify-content:space-between;gap:10px;list-style:none;cursor:pointer;font-size:13.5px}
+[data-review-ws] details summary::-webkit-details-marker{display:none}
+[data-review-ws] details summary span:first-child{color:var(--muted)}
+[data-review-ws] details[open] summary{margin-bottom:8px}
+[data-review-ws] .rw-detail{font-size:12.5px;color:var(--muted);line-height:1.55}
+[data-review-ws] .rw-detail .item{margin:0 0 8px;padding-left:9px;border-left:2px solid var(--line-strong)}
+[data-review-ws] .rw-detail .item.bad{border-left-color:color-mix(in srgb,var(--danger) 55%,transparent)}
+[data-review-ws] .rw-detail .item.warn{border-left-color:color-mix(in srgb,var(--gold) 55%,transparent)}
+[data-review-ws] .rw-detail .item b{display:block;color:var(--ink);font-weight:600}
+[data-review-ws] .rw-opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+[data-review-ws] .rw-opt{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:12px;border-radius:14px;text-align:left;cursor:pointer;border:1px solid color-mix(in srgb,var(--c) 18%,var(--line));background:radial-gradient(120% 90% at 100% 0%,color-mix(in srgb,var(--c) 13%,transparent) 0%,transparent 55%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 92%,#fff 8%),var(--surface));transition:transform .18s,border-color .18s,box-shadow .18s}
+[data-review-ws] .rw-opt:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--c) 45%,var(--line))}
+[data-review-ws] .rw-opt[aria-pressed="true"]{border-color:color-mix(in srgb,var(--c) 75%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
+[data-review-ws] .rw-opt .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+[data-review-ws] .rw-opt[aria-pressed="true"] .ic{background:var(--c);color:var(--surface-2)}
+[data-review-ws] .rw-opt b{font-size:13.5px}
+[data-review-ws] .rw-opt small{font-size:11.5px;color:var(--muted);line-height:1.3}
+[data-review-ws] .rw-form{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+[data-review-ws] .rw-form label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600}
+[data-review-ws] .rw-form label em{font-style:normal;font-weight:500;color:var(--faint)}
+[data-review-ws] .rw-ta{width:100%;min-height:110px;resize:vertical;padding:11px 13px;border-radius:12px;border:1px solid var(--line-strong);background:var(--input);color:var(--ink);font-size:14px;font-weight:400;line-height:1.5;outline:none}
+[data-review-ws] .rw-ta:focus{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-review-ws] .rw-info{display:flex;gap:10px;padding:10px 12px;border-radius:12px;font-size:12.5px;line-height:1.5;color:var(--muted);background:var(--brand-soft);border:1px solid color-mix(in srgb,var(--brand-text) 25%,transparent)}
+[data-review-ws] .rw-done{padding:12px 14px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);font-size:13px;color:var(--muted)}
+[data-review-ws] .rw-banner{display:flex;align-items:center;gap:14px;padding:14px 18px;border-color:color-mix(in srgb,var(--brand-text) 35%,transparent);background:linear-gradient(90deg,var(--brand-soft),var(--surface) 65%)}
+[data-review-ws] .rw-banner .tick{width:40px;height:40px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--brand-solid);color:var(--on-brand)}
+[data-review-ws] .rw-backdrop{position:fixed;inset:0;z-index:300;display:grid;place-items:center;padding:20px;background:rgba(6,16,19,.62)}
+[data-review-ws] .rw-dialog{width:min(540px,100%);padding:24px;border-radius:20px;background:var(--surface);border:1px solid var(--line-strong);box-shadow:0 30px 60px -20px rgba(0,0,0,.85);display:flex;flex-direction:column;gap:16px}
+[data-review-ws] .rw-reason{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--input);text-align:left;font-size:14px;cursor:pointer}
+[data-review-ws] .rw-reason i{width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--faint)}
+[data-review-ws] .rw-reason[aria-checked="true"]{border-color:var(--danger);background:var(--danger-soft)}
+[data-review-ws] .rw-reason[aria-checked="true"] i{border:5px solid var(--danger)}
+@media (prefers-reduced-motion:reduce){[data-review-ws] *{transition:none!important}}`;
+
+const RwIcon = ({ d, s = 18, w = 2 }) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={w}
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+);
+const RW = {
+    back: "M19 12H5M12 19l-7-7 7-7",
+    // Lucide "arrow-down-to-line"
+    download: "M12 17V3M6 11l6 6 6-6M19 21H5",
+    check: "M5 12l4 4 10-10",
+    ret: "M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11",
+    x: "M6 6l12 12M18 6L6 18",
+    warn: "M12 3l10 18H2zM12 10v5M12 18h.01",
+    info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 8v4M12 16h.01",
+};
+
+// The pill colour of each recorded status, in the theme's own tokens.
+const RW_STATUS = {
+    "Pending Review": "var(--gold)", "Approved": "var(--brand-text)", "Returned": "var(--gold)",
+    "Rejected": "var(--danger)", "Final": "var(--teal-ink)", "Under Review": "var(--teal-ink)",
+};
+const RW_URGENCY = { Urgent: "var(--danger)", Priority: "var(--gold)", Normal: "var(--faint)" };
+const rwTint = c => ({ color: c, background: `color-mix(in srgb, ${c} 14%, transparent)` });
+
+function DownloadPdfButton({ doc, t, style, className }) {
     const [issue, setIssue] = useState(null);
     const [busy, setBusy] = useState(false);
     const download = async () => {
@@ -540,9 +631,13 @@ function DownloadPdfButton({ doc, t, style }) {
         if (result?.error) setIssue(typeof result.error === "string" ? result.error : (result.error.message || "Download failed"));
     };
     return (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-            <button onClick={download} disabled={busy} style={style}>{busy ? "Downloading…" : "⬇ Download PDF"}</button>
-            {issue && <div role="alert" style={{ fontSize: 11, color: t.danger }}>{issue}</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+            <button type="button" className={`${className} rw-icon-btn rw-dl`} onClick={download} disabled={busy} style={style}
+                title={busy ? "Downloading…" : "Download PDF"} aria-busy={busy}>
+                <RwIcon d={RW.download} s={18} />
+                <span className="rw-sr">{busy ? "Downloading…" : "Download PDF"}</span>
+            </button>
+            {issue && <div role="alert" style={{ fontSize: 12, color: "var(--danger)", maxWidth: 320 }}>{issue}</div>}
         </div>
     );
 }
@@ -551,17 +646,378 @@ function DownloadPdfButton({ doc, t, style }) {
  * end with only a shortened reference. A standalone document says so plainly. */
 function CaseLink({ doc, t }) {
     const { setPage, setOpenCaseId } = useCase();
-    if (!doc.caseRawId) return <span data-case-link="none" style={{ color: t.textMuted }}>No case — standalone document</span>;
+    if (!doc.caseRawId) return <span data-case-link="none">No case — standalone document</span>;
     return (
-        <button type="button" data-case-link={doc.caseRawId} title="Open this case"
+        <button type="button" data-case-link={doc.caseRawId} title="Open this case" className="rw-mono"
             onClick={() => { setOpenCaseId?.(doc.caseRawId); setPage?.("cases"); }}
-            style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "monospace", fontSize: 10.5, color: t.primary, textDecoration: "underline", textUnderlineOffset: 2 }}>
-            Case {doc.caseId} ↗
+            style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--teal-ink)", textDecoration: "underline", textUnderlineOffset: 2 }}>
+            Case {doc.caseId}
         </button>
     );
 }
 
-function ScreenReview({ doc, t, onBack, onContinue }) {
+/* "Waiting 2 days", from the instant it was sent. */
+function _waited(iso) {
+    if (!iso) return "";
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return days <= 0 ? "sent today" : `waiting ${days} day${days === 1 ? "" : "s"}`;
+}
+
+/* The page header both screens share: breadcrumb back to the inbox, the
+ * title, who and what it is, and where it stands. */
+function ReviewHeader({ doc, t, onBack, right, extra }) {
+    const statusColour = RW_STATUS[doc.status] || "var(--teal-ink)";
+    return (
+        <header className="rw-head">
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 14, minWidth: 0 }}>
+                <button type="button" className="rw-back" onClick={onBack}
+                    aria-label="Back to document review" title="Back to document review">
+                    <RwIcon d={RW.back} s={18} w={2.2} />
+                </button>
+                <div style={{ minWidth: 0 }}>
+                    <nav className="rw-crumbs" aria-label="Breadcrumb">
+                        <span>Documents</span><span aria-hidden="true">/</span>
+                        <button type="button" onClick={onBack}>Document review</button>
+                    </nav>
+                    <h1>{doc.title}</h1>
+                    <div className="rw-meta">
+                        <span>{doc.client}</span><span aria-hidden="true">·</span>
+                        <span>{doc.type}{doc.textEdited ? " (wording edited by client)" : ""}</span><span aria-hidden="true">·</span>
+                        <CaseLink doc={doc} t={t} />
+                        {doc.submitted && <><span aria-hidden="true">·</span><span>Sent {doc.submitted}{doc.status === "Pending Review" && doc.submittedAt ? ` · ${_waited(doc.submittedAt)}` : ""}</span></>}
+                        {doc.urgency && doc.urgency !== "Normal" && (
+                            <span className="rw-pill" style={rwTint(RW_URGENCY[doc.urgency])}><i />{doc.urgency}</span>
+                        )}
+                        {extra}
+                        <span className="rw-pill" style={rwTint(statusColour)}><i />{doc.status}</span>
+                    </div>
+                </div>
+            </div>
+            {right && <div className="rw-head-right">{right}</div>}
+        </header>
+    );
+}
+
+/* "Next document": the next one waiting in the queue, in the inbox's own
+ * work order, so a lawyer can go through them without returning each time. */
+/* "Previous document": back to the one the lawyer moved on from with Next. */
+function PrevDocButton({ prev }) {
+    if (!prev) return null;
+    return (
+        <button type="button" className="rw-btn rw-next rw-prev" onClick={prev.open}
+            title={`Back to: ${prev.title}`} aria-label={`Previous document, ${prev.title}`}>
+            <span className="rw-next-arrow"><RwIcon d="M19 12H5M12 19l-7-7 7-7" s={16} w={2.2} /></span>
+            <span className="rw-next-label">Previous</span>
+        </button>
+    );
+}
+
+function NextDocButton({ next }) {
+    if (!next) return null;
+    return (
+        <button type="button" className="rw-btn rw-next" onClick={next.open}
+            title={`Next waiting: ${next.title}`} aria-label={`Next document, ${next.position}`}>
+            <span className="rw-next-label">Next document</span>
+            {next.count > 0 && <span className="rw-next-count">{next.count}</span>}
+            <span className="rw-next-arrow"><RwIcon d="M5 12h14M12 5l7 7-7 7" s={16} w={2.2} /></span>
+        </button>
+    );
+}
+
+/* Reject: a reason is required and said to the client. Three common ones
+ * to pick from; the choice and any note go out as the one note the server
+ * already records. */
+const REJECT_REASONS = [
+    "This is not the right document for this matter.",
+    "This is outside what I agreed to review.",
+];
+
+function RejectDialog({ busy, onCancel, onConfirm }) {
+    const [reason, setReason] = useState(REJECT_REASONS[0]);
+    const [other, setOther] = useState(false);
+    const [note, setNote] = useState("");
+    const text = (other ? note.trim() : [reason, note.trim()].filter(Boolean).join("\n\n"));
+    useEffect(() => {
+        const onKey = e => { if (e.key === "Escape") onCancel(); };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onCancel]);
+    return (
+        <div className="rw-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}>
+            <section className="rw-dialog" role="dialog" aria-modal="true" aria-label="Reject this document">
+                <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                    <span style={{ width: 46, height: 46, flex: "none", borderRadius: 14, display: "grid", placeItems: "center", color: "var(--danger)", background: "var(--danger-soft)" }}>
+                        <RwIcon d={RW.warn} s={22} w={2.2} />
+                    </span>
+                    <div>
+                        <h2 className="rw-h" style={{ fontSize: 20 }}>Reject this document?</h2>
+                        <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
+                            The client is told it was rejected and why. If it only needs changes, return it instead.
+                        </p>
+                    </div>
+                </div>
+                <div role="radiogroup" aria-label="Reason" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Reason <span style={{ color: "var(--danger)" }}>*</span></span>
+                    {REJECT_REASONS.map(r => (
+                        <button key={r} type="button" role="radio" className="rw-reason" aria-checked={!other && reason === r}
+                            onClick={() => { setOther(false); setReason(r); }}><i />{r.replace(/\.$/, "")}</button>
+                    ))}
+                    <button type="button" role="radio" className="rw-reason" aria-checked={other}
+                        onClick={() => setOther(true)}><i />Something else</button>
+                </div>
+                <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, fontWeight: 600 }}>
+                    <span>{other ? <>Reason for the client <span style={{ color: "var(--danger)" }}>*</span></> : <>Note to the client <em style={{ fontStyle: "normal", fontWeight: 500, color: "var(--faint)" }}>(optional)</em></>}</span>
+                    <textarea className="rw-ta" style={{ minHeight: 90 }} value={note} onChange={e => setNote(e.target.value)}
+                        placeholder={other ? "Why it cannot go ahead" : "What they should do instead"} />
+                </label>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                    <button type="button" className="rw-btn" onClick={onCancel}>Cancel</button>
+                    <button type="button" className="rw-cta danger" disabled={busy || !text} onClick={() => onConfirm(text)}>
+                        {busy ? "Sending…" : "Reject document"}
+                    </button>
+                </div>
+            </section>
+        </div>
+    );
+}
+
+/* The decision, at the foot of the review column. Approve, Return and Reject
+ * call the same `onDecide` the old decision screen did. */
+function DecisionPanel({ doc, busy, onDecide }) {
+    const [decision, setDecision] = useState(null); // null | "approve" | "edit" | "reject"
+    const [editNotes, setEditNotes] = useState("");
+    const [returnNote, setReturnNote] = useState("");
+
+    if (doc.status !== "Pending Review") {
+        return (
+            <section className="rw-card rw-sec" aria-label="Decision">
+                <h2 className="rw-h">Decision recorded</h2>
+                <div className="rw-done" style={{ marginTop: 10 }}>
+                    <b style={{ color: "var(--ink)" }}>{doc.status}</b>
+                    {doc.lawyerNote ? <div style={{ marginTop: 6, fontStyle: "italic" }}>“{doc.lawyerNote}”</div> : null}
+                </div>
+            </section>
+        );
+    }
+
+    const options = [
+        { id: "approve", c: "var(--brand-text)", d: RW.check, w: 2.4, label: "Approve", sub: "Legally sound" },
+        { id: "edit", c: "var(--gold)", d: RW.ret, w: 2.2, label: "Return", sub: "Needs changes" },
+        { id: "reject", c: "var(--danger)", d: RW.x, w: 2.4, label: "Reject", sub: "Cannot go ahead" },
+    ];
+    return (
+        <section className="rw-card rw-sec" aria-label="Your decision"
+            style={decision === "approve" ? { borderColor: "color-mix(in srgb, var(--brand-text) 45%, transparent)" }
+                : decision === "edit" ? { borderColor: "color-mix(in srgb, var(--gold) 50%, transparent)" } : undefined}>
+            <h2 className="rw-h">Your decision</h2>
+            <div className="rw-opts" role="group" aria-label="Decision">
+                {options.map(o => (
+                    <button key={o.id} type="button" className="rw-opt" style={{ "--c": o.c }}
+                        aria-pressed={decision === o.id} onClick={() => setDecision(o.id)}>
+                        <span className="ic"><RwIcon d={o.d} s={17} w={o.w} /></span>
+                        <b>{o.label}</b><small>{o.sub}</small>
+                    </button>
+                ))}
+            </div>
+
+            {decision === null && (
+                <p style={{ margin: "12px 0 0", fontSize: 12.5, color: "var(--faint)" }}>
+                    Pick one. The document stays on screen while you write your note.
+                </p>
+            )}
+
+            {decision === "approve" && (
+                <div className="rw-form">
+                    <label>
+                        <span>Note to the client <em>(optional)</em></span>
+                        <textarea className="rw-ta" value={editNotes} onChange={e => setEditNotes(e.target.value)}
+                            placeholder="e.g. Approved. Please file within 7 working days." />
+                    </label>
+                    <div className="rw-info">
+                        <span style={{ color: "var(--brand-text)", display: "flex" }}><RwIcon d={RW.info} s={17} /></span>
+                        <span>The client is notified, and this exact version becomes the final one.</span>
+                    </div>
+                    <button type="button" className="rw-cta" disabled={busy} onClick={() => onDecide("approve", editNotes.trim() || null)}>
+                        {busy ? "Sending…" : "Approve & notify client"}
+                    </button>
+                    <button type="button" className="rw-btn" onClick={() => setDecision(null)}>Cancel</button>
+                </div>
+            )}
+
+            {decision === "edit" && (
+                <div className="rw-form">
+                    <label>
+                        <span>Required Changes <span style={{ color: "var(--danger)" }}>*</span></span>
+                        <textarea className="rw-ta" style={{ minHeight: 130 }} value={returnNote} onChange={e => setReturnNote(e.target.value)}
+                            placeholder="e.g. Update para 2 with the correct termination date, and add the CNIC number in the plaintiff's details." />
+                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--faint)" }}>The client sees this with the returned document, and can send it back.</span>
+                    </label>
+                    {doc.note && (
+                        <div className="rw-done"><b style={{ color: "var(--gold)" }}>They asked:</b> “{doc.note}”</div>
+                    )}
+                    <button type="button" className="rw-cta gold" disabled={busy || !returnNote.trim()}
+                        onClick={() => onDecide("return", returnNote.trim() || null)}>
+                        {busy ? "Sending…" : "Return to client"}
+                    </button>
+                    <button type="button" className="rw-btn" onClick={() => setDecision(null)}>Cancel</button>
+                </div>
+            )}
+
+            {decision === "reject" && (
+                <RejectDialog busy={busy} onCancel={() => setDecision(null)}
+                    onConfirm={text => onDecide("reject", text)} />
+            )}
+        </section>
+    );
+}
+
+/* What was checked when the draft was generated, frozen on the record. A
+ * summary line each, with the detail one click away. Nothing here claims a
+ * check that did not run: "not checked" is said as such, never as a pass. */
+/* A header button that opens a small panel beneath it. For information a
+ * lawyer looks at now and then -- checks, the record -- so it does not take
+ * a column of the screen. A dot marks one that needs attention. */
+function InfoPopover({ label, icon, alert = false, children }) {
+    const [open, setOpen] = useState(false);
+    const boxRef = useRef(null);
+    useEffect(() => {
+        if (!open) return undefined;
+        const onDown = e => { if (!boxRef.current?.contains(e.target)) setOpen(false); };
+        const onKey = e => { if (e.key === "Escape") setOpen(false); };
+        document.addEventListener("mousedown", onDown);
+        window.addEventListener("keydown", onKey);
+        return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+    }, [open]);
+    return (
+        <div ref={boxRef} style={{ position: "relative" }}>
+            <button type="button" className="rw-btn" aria-haspopup="dialog" aria-expanded={open}
+                onClick={() => setOpen(o => !o)}>
+                <RwIcon d={icon} s={16} />{label}
+                {alert && <i aria-label="needs attention" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--gold)" }} />}
+                <RwIcon d="M6 9l6 6 6-6" s={14} />
+            </button>
+            {open && (
+                <div role="dialog" aria-label={label} className="rw-pop">{children}</div>
+            )}
+        </div>
+    );
+}
+
+/* Whether the checks have something the lawyer should look at. */
+function checksNeedAttention(doc) {
+    const c = doc?.compliance, v = doc?.verification;
+    return Boolean((c?.checked && !c.complete) || !v
+        || (v?.counts?.not_in_corpus || 0) + (v?.counts?.omitted || 0) > 0);
+}
+
+function ChecksCard({ doc, bare = false }) {
+    const compliance = doc?.compliance || null;
+    const verification = doc?.verification || null;
+    const pillOf = (c, text) => <span className="rw-pill" style={rwTint(c)}>{text}</span>;
+
+    const partSummary = !compliance?.checked ? pillOf("var(--faint)", "Not checked")
+        : compliance.complete ? pillOf("var(--brand-text)", "Complete")
+            : pillOf("var(--gold)", `${compliance.missing} missing`);
+    const bad = (verification?.counts?.not_in_corpus || 0) + (verification?.counts?.omitted || 0);
+    const citeSummary = !verification ? pillOf("var(--gold)", "Never verified")
+        : verification.ran === false ? pillOf("var(--faint)", "Not run")
+            : verification.counts?.total === 0 ? pillOf("var(--faint)", "None cited")
+                : bad > 0 ? pillOf("var(--danger)", `${bad} to check`)
+                    : pillOf("var(--brand-text)", `${verification.counts.verified} found`);
+
+    return (
+        <section className={bare ? "" : "rw-card rw-sec"} aria-label="Checks"
+            style={!bare && bad > 0 ? { borderColor: "color-mix(in srgb, var(--danger) 45%, transparent)" } : undefined}>
+            <h2 className="rw-h" style={{ marginBottom: 8 }}>Checks</h2>
+
+            <details>
+                <summary><span>Required particulars</span>{partSummary}</summary>
+                <div className="rw-detail">
+                    {!compliance?.checked ? (
+                        // Not "all clear" — the check genuinely does not cover this
+                        // template. Saying so beats an empty panel that reads as a pass.
+                        <p style={{ margin: 0 }}>No completeness rules apply to this document type. Nothing was checked.</p>
+                    ) : (
+                        <>
+                            <p style={{ margin: "0 0 8px" }}>Checked against {compliance.basis}.{" "}
+                                {compliance.complete ? "Contains every particular the Code requires." : ""}</p>
+                            {(compliance.items || []).filter(i => i.status === "missing").map(i => (
+                                <div key={i.clause} className="item warn"><b>{i.clause} — {i.requirement}</b>{i.hint}</div>
+                            ))}
+                        </>
+                    )}
+                </div>
+            </details>
+
+            {/* Existence only, never whether an authority supports what it is
+                cited for. Leads with what could NOT be confirmed. */}
+            <details>
+                <summary><span>Authorities cited</span>{citeSummary}</summary>
+                <div className="rw-detail">
+                    {verification?.scope && <p style={{ margin: "0 0 8px", fontSize: 11.5 }}>{verification.scope}</p>}
+                    {!verification ? (
+                        <p style={{ margin: 0 }}>This document predates citation checking. Its authorities were never verified — check each one before filing.</p>
+                    ) : verification.ran === false ? (
+                        <p style={{ margin: 0 }}>{verification.summary}</p>
+                    ) : verification.counts?.total === 0 ? (
+                        <p style={{ margin: 0 }}>No authority is cited anywhere in this draft.</p>
+                    ) : (
+                        <>
+                            <p style={{ margin: "0 0 8px" }}>
+                                {verification.counts.verified} found in the corpus ·{" "}
+                                {verification.counts.omitted > 0 && <>{verification.counts.omitted} REPEALED · </>}
+                                {verification.counts.unverifiable} cannot be checked here
+                            </p>
+                            {(verification.checks || []).filter(c => c.status !== "VERIFIED").map((c, i) => (
+                                <div key={`${c.canonical}-${i}`} className={`item ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? "bad" : ""}`}>
+                                    <b>{c.canonical}{c.status === "OMITTED" ? " — repealed" : c.status === "NOT_IN_CORPUS" ? " — not found" : " — cannot verify"}</b>
+                                    {c.detail}
+                                </div>
+                            ))}
+                            <p style={{ margin: 0, fontStyle: "italic" }}>Existence only — a real provision cited for something it does not say still shows as found.</p>
+                        </>
+                    )}
+                </div>
+            </details>
+
+            <div className="rw-kv"><span>Category</span><b>{doc.caseCategory}</b></div>
+        </section>
+    );
+}
+
+function ScreenReview({ doc, t, onBack, onDecide, busy, next, prev }) {
+    // EDITING (2026-10-11). The lawyer may change the wording and send it back
+    // as their proposal -- a RETURN with edits, never an approval. Only while
+    // the document waits for their decision, and only on the V2 record whose
+    // submitted bytes the return is bound to.
+    const canEdit = doc.status === "Pending Review" && doc.submittedVersion != null && !!doc.submittedPdfSha256;
+    const [edit, setEdit] = useState(null);          // null | { html } while editing
+    const [editErr, setEditErr] = useState("");
+    const [loadingEdit, setLoadingEdit] = useState(false);
+    const [dirty, setDirty] = useState(false);
+    const [editNote, setEditNote] = useState("");
+    const editorRef = useRef(null);
+    const startEdit = async () => {
+        setEditErr(""); setLoadingEdit(true);
+        const { data, error } = await getReviewTextV2(doc.id);
+        setLoadingEdit(false);
+        if (error || !data?.body_html) {
+            setEditErr(error?.message || "This document's text could not be opened for editing.");
+            return;
+        }
+        setDirty(false); setEditNote("");
+        setEdit({ html: data.body_html });
+    };
+    const cancelEdit = () => {
+        if (dirty && typeof window !== "undefined"
+            && !window.confirm("Discard your edits to this document?")) return;
+        setEdit(null); setDirty(false); setEditErr("");
+    };
+    const sendEdits = () => {
+        const html = editorRef.current?.innerHTML || "";
+        if (!html.trim()) return;
+        onDecide("return", editNote.trim() || null, null, html);
+    };
     // The REAL generated PDF, rendered inline. This replaced DOC_CONTENT — a
     // hardcoded employment-dispute plaint the lawyer used to review and approve
     // regardless of the actual document.
@@ -571,22 +1027,12 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
     //
     // The decision is never taken from this. `handleDecide` sends the SUBMITTED
     // version and hash whatever is on screen, because approving is a statement
-    // about the artifact the client submitted, and a reviewer who could approve
-    // while reading v1 would be signing off on a document nobody filed. Browsing
-    // the history is context for that decision, not the subject of it.
+    // about the artifact the client submitted. Browsing the history is context
+    // for that decision, not the subject of it.
     const [viewRev, setViewRev] = useState(null);
-    // PINNED TO THE REVISION UNDER REVIEW, not to "the current file".
-    //
-    // The legacy path fetched whatever the document currently was, so a client
-    // who regenerated after submitting would have the lawyer reading the NEW
-    // bytes while deciding on the submitted ones — and the decision guard would
-    // then refuse, with no explanation of what they had actually been looking
-    // at. Naming the submitted revision keeps the page and the decision on the
-    // same object.
-    //
-    // The old cleanup also leaked: it revoked `url`, a local still null when
-    // the fetch resolved after unmount, while the object URL had already been
-    // created inside the helper. A late arrival is revoked on arrival now.
+    const [tools, setTools] = useState(false);
+    // PINNED TO THE REVISION UNDER REVIEW, not to "the current file". A late
+    // arrival after unmount is revoked on arrival.
     useEffect(() => {
         let live = true, url = null;
         if (!doc?.id) return;
@@ -603,478 +1049,128 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
         });
         return () => { live = false; if (url) URL.revokeObjectURL(url); };
     }, [doc?.id, doc?.viewRevisionId, doc?.viewPdfSha256, viewRev]);
-    // These two come from the document itself, computed when it was generated
-    // and frozen on the record. They replace four hardcoded rows that read
-    // "Legal Compliance ✓ Verified / Case Details ✓ Verified / Factual Info
-    // ⚠ Review / Format ✓ Passed" on EVERY document regardless of content —
-    // nothing was ever checked. Telling the lawyer who signs and files that a
-    // draft is verified, when no check ran, is the most expensive lie this
-    // screen could tell.
-    const compliance = doc?.compliance || null;
-    const verification = doc?.verification || null;
     // Answers the client gave that the template has no field for. They are not
     // in the document, and the client believes they are.
     const fieldShape = doc?.fieldShape || null;
 
     return (
-        <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
-            {/* Left — document */}
-            <div style={{ display: "flex", flexDirection: "column", padding: "20px 24px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
-                {/* Doc header */}
-                <div style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14,
-                    padding: "12px 16px", background: t.card, borderRadius: 12, border: `1px solid ${t.border}`
-                }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{
-                            width: 34, height: 34, borderRadius: 9, background: t.primaryGlow,
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18
-                        }}>📄</div>
-                        <div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{doc.title}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>
-                                {doc.type}{doc.textEdited ? " (wording edited by client)" : ""} · <CaseLink doc={doc} t={t} /> · {doc.client}
-                            </div>
-                        </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <StatusPill status={doc.status} t={t} />
-                    </div>
-                </div>
-
-                {/* Document — the REAL generated PDF, rendered inline. */}
-                {viewRev && (
-                    <div style={{ marginBottom: 10, padding: "9px 13px", borderRadius: 10, background: "rgba(255,200,87,0.10)", border: "1px solid rgba(255,200,87,0.35)", fontSize: 11.5, color: t.textDim, display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ flex: 1 }}>
-                            Reading an earlier draft (v{viewRev.version}). Your decision still
-                            applies to the version the client submitted.
-                        </span>
-                        <button onClick={() => setViewRev(null)}
-                            style={{ background: "transparent", border: `1px solid ${t.border}`, borderRadius: 8, padding: "5px 11px", fontSize: 11, fontWeight: 700, color: t.text, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
-                            Back to submitted
+        <div data-review-ws data-drafting-theme data-mode={draftingMode(t)}>
+            <style>{`${DRAFTING_TOKENS_CSS}\n${REVIEW_CSS}\n${REVIEW_PDF_CSS}\n${REVIEW_EDITOR_CSS}`}</style>
+            <div className="rw-wrap">
+                <ReviewHeader doc={doc} t={t} onBack={onBack}
+                    right={edit ? <>
+                        <button type="button" className="rw-btn" onClick={cancelEdit} disabled={busy}>Cancel</button>
+                        <button type="button" className="rw-cta gold" style={{ height: 40, borderRadius: 10, fontSize: 14 }}
+                            disabled={busy || !dirty} onClick={sendEdits}
+                            title={dirty ? "Return the document to the client with your edits" : "Change the text first"}>
+                            <RwIcon d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" s={16} />
+                            {busy ? "Sending…" : "Send back with my edits"}
                         </button>
+                    </> : <>
+                        <PrevDocButton prev={prev} />
+                        <ViewToolsButton on={tools} onToggle={() => setTools(v => !v)} />
+                        {canEdit && (
+                            <button type="button" className="rw-btn" onClick={startEdit} disabled={loadingEdit || busy}
+                                title="Edit the wording and send it back to the client">
+                                <RwIcon d="M12 20h9M16.38 3.62a1 1 0 0 1 3 3L7.37 18.64a2 2 0 0 1-.86.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.86z" s={16} />
+                                {loadingEdit ? "Opening…" : "Edit"}
+                            </button>
+                        )}
+                        <DownloadPdfButton doc={doc} t={t} className="rw-btn" />
+                        <NextDocButton next={next} />
+                        <InfoPopover label="Checks" icon="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" alert={checksNeedAttention(doc)}>
+                            <ChecksCard doc={doc} bare />
+                        </InfoPopover>
+                    </>} />
+
+                {editErr && <div role="alert" className="rw-card rw-sec" style={{ color: "var(--danger)", fontSize: 13.5 }}>{editErr}</div>}
+
+                {edit ? (
+                    <div aria-label="Edit document" style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+                        <label className="rw-card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", fontSize: 13, color: "var(--muted)" }}>
+                            <span style={{ flex: "none", fontWeight: 600, color: "var(--ink)" }}>Note to the client</span>
+                            <input value={editNote} onChange={e => setEditNote(e.target.value)} maxLength={2000}
+                                placeholder="Optional — e.g. I changed clause 2 and the demand amount."
+                                style={{ flex: 1, minWidth: 0, height: 34, padding: "0 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink)", font: "inherit" }} />
+                        </label>
+                        <ReviewEditor html={edit.html} editorRef={editorRef} onDirty={() => setDirty(true)} />
                     </div>
-                )}
-
-                <div style={{
-                    background: "#fff", borderRadius: 12, border: `1px solid ${t.border}`,
-                    overflow: "hidden", flex: 1, minHeight: 460
-                }}>
-                    {previewUrl ? (
-                        <iframe title="Document under review" src={previewUrl}
-                            style={{ width: "100%", height: 520, border: "none", display: "block" }} />
-                    ) : (
-                        <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 460, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            Loading the submitted document…
-                        </div>
-                    )}
-                </div>
-
-                {/* Export bar */}
-                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    <DownloadPdfButton doc={doc} t={t} style={{
-                        padding: "9px 0", borderRadius: 9,
-                        border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
-                        fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
-                    }} />
-                </div>
-            </div>
-
-            {/* Right — compliance + client note */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "20px 18px", overflowY: "auto" }}>
-
-                <RevisionHistory
-                    docId={doc.id} t={t} reloadKey={doc.viewRevisionId}
-                    currentRevisionId={viewRev?.revision_id || doc.viewRevisionId}
-                    onPreview={rev => setViewRev(
-                        rev.revision_id === doc.viewRevisionId ? null : rev)} />
-
-                {/* Client note */}
-                {doc.note && (
-                    <div style={{
-                        background: `rgba(255,200,87,0.08)`, border: `1px solid rgba(255,200,87,0.3)`,
-                        borderRadius: 12, padding: "12px 14px"
-                    }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#FFC857", marginBottom: 4 }}>📝 Client Note</div>
-                        <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6 }}>{doc.note}</div>
-                    </div>
-                )}
-
-                {doc?.textEdited && (
-                    <div data-wording-edited-notice style={{ background: t.card, border: "1px solid rgba(255,200,87,0.45)", borderRadius: 12, padding: "14px 16px" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
-                            Wording edited by the client
-                        </div>
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6, lineHeight: 1.6 }}>
-                            This document began as a {doc.type} template, but the client edited
-                            its text. It is not the template's reviewed wording. Required
-                            particulars were not checked on it; read the whole text.
-                        </div>
-                    </div>
-                )}
-
-                {fieldShape?.unknown?.length > 0 && (
-                    <div style={{ background: t.card, border: "1px solid rgba(255,200,87,0.45)", borderRadius: 12, padding: "14px 16px" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
-                            Answers not in this document
-                        </div>
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6, lineHeight: 1.6 }}>
-                            The client supplied {fieldShape.unknown.join(", ")}, which this
-                            template has no field for. Those values are NOT in the draft you
-                            are reading, and the client has no reason to know that.
-                        </div>
-                    </div>
-                )}
-
-                {/* Statutory completeness — real, from pleading_rules at generation */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
-                        Required particulars
-                    </div>
-                    {!compliance?.checked ? (
-                        // Not "all clear" — the check genuinely does not cover this
-                        // template. Saying so beats an empty panel that reads as a pass.
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
-                            No completeness rules apply to this document type. Nothing was checked.
-                        </div>
-                    ) : (
-                        <>
-                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
-                                Checked against {compliance.basis}
-                            </div>
-                            <div style={{
-                                fontSize: 12, fontWeight: 700, marginBottom: 8,
-                                color: compliance.complete ? "#4DD4A3" : "#FFC857"
-                            }}>
-                                {compliance.complete
-                                    ? "Contains every particular the Code requires"
-                                    : `${compliance.missing} required particular${compliance.missing === 1 ? "" : "s"} missing`}
-                            </div>
-                            {(compliance.items || []).filter(i => i.status === "missing").map(i => (
-                                <div key={i.clause} style={{ marginBottom: 7, paddingLeft: 9, borderLeft: "2px solid rgba(255,200,87,0.35)" }}>
-                                    <div style={{ fontSize: 11.5, fontWeight: 600, color: t.textDim }}>
-                                        {i.clause} — {i.requirement}
-                                    </div>
-                                    <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 2 }}>{i.hint}</div>
-                                </div>
-                            ))}
-                        </>
-                    )}
-                </div>
-
-                {/* Citation verification. The lawyer signing this is the one who
-                    carries the cost of a bad citation, so the panel leads with what
-                    could NOT be confirmed rather than with a count of successes.
-                    No tick: this checks existence only, never whether an authority
-                    supports the proposition it is cited for. */}
-                <div style={{
-                    background: t.card, borderRadius: 12, padding: "14px 16px",
-                    border: `1px solid ${(verification?.counts?.not_in_corpus > 0 || verification?.counts?.omitted > 0) ? "rgba(217,54,84,0.45)" : t.border}`
-                }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
-                        Authorities cited
-                    </div>
-
-                    {/* Shown OUTSIDE the ran/total branches below: the reviewer needs the
-                        scope statement whether or not the checker ran, and whether or not
-                        the draft cites anything. Shipped from backend/app/core/claims.py so
-                        this panel and the client's cannot promise different things. */}
-                    {verification?.scope && (
-                        <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 9,
-                            paddingBottom: 8, borderBottom: `1px solid ${t.border}`, lineHeight: 1.5 }}>
-                            {verification.scope}
-                        </div>
-                    )}
-
-                    {!verification ? (
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
-                            This document predates citation checking. Its authorities were
-                            never verified — check each one before filing.
-                        </div>
-                    ) : verification.ran === false ? (
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
-                            {verification.summary}
-                        </div>
-                    ) : verification.counts?.total === 0 ? (
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
-                            No authority is cited anywhere in this draft.
-                        </div>
-                    ) : (
-                        <>
-                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
-                                {verification.counts.verified} found in the corpus ·{" "}
-                                {verification.counts.omitted > 0 && (
-                                    <>{verification.counts.omitted} REPEALED · </>
-                                )}
-                                {verification.counts.unverifiable} cannot be checked here
-                            </div>
-                            {(verification.checks || [])
-                                .filter(c => c.status !== "VERIFIED")
-                                .map((c, i) => (
-                                    <div key={`${c.canonical}-${i}`} style={{
-                                        marginBottom: 8, paddingLeft: 9,
-                                        borderLeft: `2px solid ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? "rgba(217,54,84,0.5)" : "rgba(150,150,150,0.35)"}`
-                                    }}>
-                                        <div style={{
-                                            fontSize: 11.5, fontWeight: 600,
-                                            color: (c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? "#FF6B7A" : t.textDim
-                                        }}>
-                                            {c.canonical}
-                                            <span style={{ fontWeight: 500, color: t.textMuted }}>
-                                                {c.status === "OMITTED" ? " — REPEALED"
-                                                    : c.status === "NOT_IN_CORPUS" ? " — not found"
-                                                        : " — cannot verify"}
-                                            </span>
-                                        </div>
-                                        <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>
-                                    </div>
-                                ))}
-                            <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
-                                Existence only — a real provision cited for something it does
-                                not say still shows as found.
-                            </div>
-                        </>
-                    )}
-                </div>
-
-                {/* Document meta */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{
-                        fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 10
-                    }}>Document Info</div>
-                    {[
-                        ["Type", doc.type],
-                        ["Case Ref", doc.caseRawId ? doc.caseId : "None — standalone document"],
-                        ["Client", doc.client],
-                        ["Category", doc.caseCategory],
-                        ["Submitted", doc.submitted],
-                        ["Urgency", doc.urgency],
-                    ].map(([k, v]) => (
-                        <div key={k} style={{
-                            display: "flex", justifyContent: "space-between", padding: "5px 0",
-                            borderBottom: `1px solid ${t.border}25`
-                        }}>
-                            <span style={{ fontSize: 11, color: t.textFaint }}>{k}</span>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: k === "Urgency" ? URGENCY_COLOR[v] : t.textDim }}>{v}</span>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Notes for the client are written on the decision screen, where
-                    approve / return / reject send them. A notes box here was never
-                    read or sent, so it is gone. */}
-
-                {/* Continue to decision — only documents awaiting review can be decided */}
-                {doc.status === "Pending Review" ? (
-                    <Btn full onClick={onContinue}>⚖️ Proceed to Decision →</Btn>
                 ) : (
-                    <div style={{ padding: "10px 14px", borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted, textAlign: "center" }}>
-                        Decision recorded: <span style={{ fontWeight: 700, color: t.text }}>{doc.status}</span>
-                        {doc.lawyerNote ? <div style={{ marginTop: 6, fontStyle: "italic" }}>“{doc.lawyerNote}”</div> : null}
+                <div className="rw-grid">
+                    <div aria-label="Document" style={{ minWidth: 0 }}>
+                        {/* The saved bytes drawn in the review theme -- not Chrome's grey viewer. */}
+                        <ReviewPdfView url={previewUrl} tools={tools} onTools={setTools}
+                            label={<>
+                                {viewRev ? `Reading an earlier draft (v${viewRev.version})` : "The version the client sent"}
+                                {doc.submittedVersion != null && !viewRev && <> · <span className="rw-mono">v{doc.submittedVersion}</span></>}
+                            </>}
+                            notice={viewRev && (
+                                <div className="rw-doc-bar" style={{ paddingRight: 150 }}>
+                                    <span style={{ color: "var(--gold)" }}>Reading an earlier draft (v{viewRev.version}). Your decision still applies to the version the client submitted.</span>
+                                    <button type="button" className="rw-btn" style={{ height: 32 }} onClick={() => setViewRev(null)}>Back to submitted</button>
+                                </div>
+                            )} />
                     </div>
+
+                    <aside className="rw-side">
+                        {doc.note && (
+                            <section className="rw-card rw-sec rw-asked" aria-label="Client note">
+                                <small>THE CLIENT ASKED</small>
+                                <p>“{doc.note}”</p>
+                            </section>
+                        )}
+
+                        {doc?.textEdited && (
+                            <section data-wording-edited-notice className="rw-card rw-sec rw-flag">
+                                <b>Wording edited by the client</b>
+                                <p>This document began as a {doc.type} template, but the client edited its text.
+                                    It is not the template's reviewed wording. Required particulars were not
+                                    checked on it; read the whole text.</p>
+                            </section>
+                        )}
+
+                        {fieldShape?.unknown?.length > 0 && (
+                            <section className="rw-card rw-sec rw-flag">
+                                <b>Answers not in this document</b>
+                                <p>The client supplied {fieldShape.unknown.join(", ")}, which this template has no
+                                    field for. Those values are NOT in the draft you are reading, and the client has
+                                    no reason to know that.</p>
+                            </section>
+                        )}
+
+                        {/* Statutory completeness and citations: in the header's
+                            "Checks" button now, not a column of their own. */}
+
+                        {/* Its own card, and nothing at all when there is only the one
+                            version -- a wrapper here showed as an empty bar. */}
+                        <RevisionHistory
+                            docId={doc.id} t={t} reloadKey={doc.viewRevisionId}
+                            currentRevisionId={viewRev?.revision_id || doc.viewRevisionId}
+                            onPreview={rev => setViewRev(
+                                rev.revision_id === doc.viewRevisionId ? null : rev)} />
+
+                        <DecisionPanel doc={doc} busy={busy} onDecide={onDecide} />
+                    </aside>
+                </div>
                 )}
-                <Btn full variant="secondary" onClick={onBack}>← Back to Inbox</Btn>
             </div>
         </div>
     );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SCREEN 3 — APPROVE / EDIT / REJECT
-// Lawyer makes final decision — mirrors client "Submit to Lawyer"
-// but reversed: lawyer is the one deciding
-// ═══════════════════════════════════════════════════════════════
-function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
-    const [decision, setDecision] = useState(null); // null | "approve" | "edit" | "reject"
-    const [editNotes, setEditNotes] = useState("");
-    const [rejectReason, setRejectReason] = useState("");
-    const [returnNote, setReturnNote] = useState("");
-
-    return (
-        <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 320px", gap: 0, overflow: "hidden" }}>
-
-            {/* Left — decision actions */}
-            <div style={{ padding: "22px 26px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
-
-                {/* Doc reference banner */}
-                <div style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "12px 16px", background: t.card, borderRadius: 12, border: `1px solid ${t.border}`, marginBottom: 20
-                }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ fontSize: 20 }}>📄</span>
-                        <div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{doc.title}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted }}>{doc.client} · <CaseLink doc={doc} t={t} /></div>
-                        </div>
-                    </div>
-                    <span style={{
-                        fontSize: 11, padding: "3px 10px", borderRadius: 20,
-                        background: "rgba(90,179,255,0.15)", color: "#5AB3FF", border: "1px solid rgba(90,179,255,0.3)",
-                        fontWeight: 700
-                    }}>{doc.status}</span>
-                </div>
-
-                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>⚖️ Your Decision</div>
-                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 18 }}>Select an action for this document</div>
-
-                {/* Decision cards */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginBottom: 28 }}>
-                    {[
-                        { id: "approve", icon: "✅", label: "Approve & Sign", desc: "Document is legally sound", color: "#4DD4A3", bg: "rgba(77,212,163,0.1)", border: "rgba(77,212,163,0.3)" },
-                        { id: "edit", icon: "✏️", label: "Edit & Return", desc: "Return with corrections", color: "#FFC857", bg: "rgba(255,200,87,0.1)", border: "rgba(255,200,87,0.3)" },
-                        { id: "reject", icon: "❌", label: "Reject", desc: "Document cannot proceed", color: "#FF6B7A", bg: "rgba(255,107,122,0.1)", border: "rgba(255,107,122,0.3)" },
-                    ].map(opt => (
-                        <div key={opt.id} onClick={() => setDecision(opt.id)}
-                            style={{
-                                padding: "20px 16px", borderRadius: 12, cursor: "pointer",
-                                border: `2px solid ${decision === opt.id ? opt.color : t.border}`,
-                                background: decision === opt.id ? opt.bg : t.card,
-                                transition: "all .18s", textAlign: "center",
-                                minHeight: 140, display: "flex", flexDirection: "column", justifyContent: "center"
-                            }}>
-                            <div style={{ fontSize: 28, marginBottom: 10 }}>{opt.icon}</div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: decision === opt.id ? opt.color : t.text, marginBottom: 6 }}>{opt.label}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.4 }}>{opt.desc}</div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Conditional forms */}
-                {decision === "approve" && (
-                    <div style={{ background: t.card, border: `1px solid rgba(77,212,163,0.3)`, borderRadius: 12, padding: "20px" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#4DD4A3", marginBottom: 16 }}>✅ Approval Details</div>
-                        <div style={{ marginBottom: 16 }}>
-                            <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Approval Note to Client (optional)</div>
-                            <Input type="textarea" rows={3} value={editNotes} onChange={e => setEditNotes(e.target.value)}
-                                placeholder="e.g. Document approved. Please file within 7 working days..." />
-                        </div>
-                        <Btn full variant="success" disabled={busy} onClick={() => onDecide("approve", editNotes.trim() || null)}>
-                            {busy ? "Sending…" : "✅ Confirm Approval & Notify Client"}
-                        </Btn>
-                    </div>
-                )}
-
-                {decision === "edit" && (
-                    <div style={{ background: t.card, border: `1px solid rgba(255,200,87,0.3)`, borderRadius: 12, padding: "20px" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#FFC857", marginBottom: 16 }}>✏️ Edit Instructions</div>
-                        <div style={{ marginBottom: 16 }}>
-                            <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Required Changes</div>
-                            <Input type="textarea" rows={4} value={returnNote} onChange={e => setReturnNote(e.target.value)}
-                                placeholder="e.g. Please update para 2 with correct termination date, add CNIC number in plaintiff details..." />
-                        </div>
-                        <Btn full variant="warn" disabled={busy} onClick={() => onDecide("return", returnNote.trim() || null)}>
-                            {busy ? "Sending…" : "↩ Return to Client with Notes"}
-                        </Btn>
-                    </div>
-                )}
-
-                {decision === "reject" && (
-                    <div style={{ background: t.card, border: `1px solid rgba(255,107,122,0.3)`, borderRadius: 12, padding: "20px" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#FF6B7A", marginBottom: 16 }}>❌ Rejection Reason</div>
-                        <div style={{ marginBottom: 16 }}>
-                            <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Reason (required)</div>
-                            <Input type="textarea" rows={4} value={rejectReason} onChange={e => setRejectReason(e.target.value)}
-                                placeholder="e.g. Document contains factual inaccuracies and cannot proceed in current state..." />
-                        </div>
-                        <Btn full variant="danger" disabled={busy || !rejectReason.trim()} onClick={() => onDecide("reject", rejectReason.trim())}>
-                            {busy ? "Sending…" : "❌ Confirm Rejection"}
-                        </Btn>
-                    </div>
-                )}
-            </div>
-
-            {/* Right — document summary + actions */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "22px 18px", overflowY: "auto" }}>
-
-                {/* Client & urgency */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-                        <Avatar name={doc.client} size={40} t={t} />
-                        <div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{doc.client}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted }}>{doc.caseCategory} · {doc.type}</div>
-                        </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <UrgencyBadge urgency={doc.urgency} />
-                        <StatusPill status={doc.status} t={t} />
-                    </div>
-                </div>
-
-                {/* Client note */}
-                {doc.note && (
-                    <div style={{ background: `rgba(255,200,87,0.08)`, border: `1px solid rgba(255,200,87,0.3)`, borderRadius: 12, padding: "12px 14px" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#FFC857", marginBottom: 4 }}>📝 Client Note</div>
-                        <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6 }}>{doc.note}</div>
-                    </div>
-                )}
-
-                {/* Response timeline */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px" }}>
-                    <div style={{
-                        fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 12
-                    }}>⏱ Response SLA</div>
-                    {[
-                        { l: "Normal", t2: "No rush", extra: "", sel: doc.urgency === "Normal" },
-                        { l: "Priority", t2: "Needed soon", extra: "", sel: doc.urgency === "Priority" },
-                        { l: "Urgent", t2: "Time-critical", extra: "", sel: doc.urgency === "Urgent" },
-                    ].map(s => (
-                        <div key={s.l} style={{
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "8px 12px", borderRadius: 8, marginBottom: 6,
-                            border: `1px solid ${s.sel ? t.primary : t.border}`,
-                            background: s.sel ? t.primaryGlow : "transparent"
-                        }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <div style={{
-                                    width: 7, height: 7, borderRadius: "50%",
-                                    background: s.sel ? t.primary : t.textFaint
-                                }} />
-                                <span style={{ fontSize: 12, color: s.sel ? t.primary : t.textDim, fontWeight: s.sel ? 700 : 400 }}>{s.l}</span>
-                            </div>
-                            <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: 10, color: t.textFaint }}>{s.t2}</div>
-                                {s.extra && <div style={{ fontSize: 9, color: t.warn }}>{s.extra}</div>}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <Btn full variant="secondary" onClick={onBack}>← Back</Btn>
-            </div>
-        </div>
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SCREEN 5 — FINAL & EXPORT
-// Mirrors client Screen 4 exactly — final document view
+// FINAL — the approved document
 // ═══════════════════════════════════════════════════════════════
 // complianceSummary tone → colour. Neutral is not green: "not checked" is not a pass.
-const _PARTICULARS_COLOR = (t) => ({ success: t.success, warn: "#FFC857", neutral: t.textMuted });
+const _PARTICULARS_COLOR = { success: "var(--brand-text)", warn: "var(--gold)", neutral: "var(--faint)" };
 
-function ScreenFinal({ doc, t, onBack }) {
-    const { user } = useAuth();
-    const lawyerName = user?.full_name || "Advocate";
+function ScreenFinal({ doc, t, onBack, next, prev }) {
+    const [tools, setTools] = useState(false);
     const particulars = complianceSummary(doc?.compliance);
     const approvedOn = doc?.reviewedAt
-        ? new Date(doc.reviewedAt).toLocaleDateString("en-GB") : null;
+        ? new Date(doc.reviewedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
     const [previewUrl, setPreviewUrl] = useState(null);
-    // PINNED TO THE REVISION UNDER REVIEW, not to "the current file".
-    //
-    // The legacy path fetched whatever the document currently was, so a client
-    // who regenerated after submitting would have the lawyer reading the NEW
-    // bytes while deciding on the submitted ones — and the decision guard would
-    // then refuse, with no explanation of what they had actually been looking
-    // at. Naming the submitted revision keeps the page and the decision on the
-    // same object.
-    //
-    // The old cleanup also leaked: it revoked `url`, a local still null when
-    // the fetch resolved after unmount, while the object URL had already been
-    // created inside the helper. A late arrival is revoked on arrival now.
+    // PINNED TO THE REVISION THAT WAS DECIDED; a late arrival is revoked.
     useEffect(() => {
         let live = true, url = null;
         if (!doc?.id) return;
@@ -1091,146 +1187,35 @@ function ScreenFinal({ doc, t, onBack }) {
         });
         return () => { live = false; if (url) URL.revokeObjectURL(url); };
     }, [doc?.id, doc?.viewRevisionId, doc?.viewPdfSha256]);
+
+    // Only what was recorded, said once. The fixed "Workflow complete" list
+    // that used to sit here ticked "AI Draft Generated" on every document,
+    // drafted by AI or not; the type, client and case are in the header.
     return (
-        <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
+        <div data-review-ws data-drafting-theme data-mode={draftingMode(t)}>
+            <style>{`${DRAFTING_TOKENS_CSS}\n${REVIEW_CSS}\n${REVIEW_PDF_CSS}`}</style>
+            <div className="rw-wrap">
+                <ReviewHeader doc={{ ...doc, status: "Final" }} t={t} onBack={onBack}
+                    extra={<>
+                        {/* When the decision was RECORDED — not today's date. */}
+                        <span aria-hidden="true">·</span><span>Approved {approvedOn || "— date not recorded"}</span>
+                        {/* What pleading_rules found, frozen at generation; shown
+                            only when it found something missing. */}
+                        {particulars.tone === "warn" && (
+                            <span className="rw-pill" style={rwTint(_PARTICULARS_COLOR.warn)}><i />{particulars.label}</span>
+                        )}
+                    </>}
+                    right={<>
+                        {/* Export: only the revision-bound download is real, so only it is shown. */}
+                        <PrevDocButton prev={prev} />
+                        <ViewToolsButton on={tools} onToggle={() => setTools(v => !v)} />
+                        <DownloadPdfButton doc={doc} t={t} className="rw-btn" />
+                        <NextDocButton next={next} />
+                    </>} />
 
-            {/* Left — final document */}
-            <div style={{ padding: "22px 26px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
-                {/* Doc header */}
-                <div style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "12px 16px", background: t.card, borderRadius: 12, border: `1px solid ${t.border}`, marginBottom: 16
-                }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{
-                            width: 34, height: 34, borderRadius: 9, background: "rgba(64,240,220,0.15)",
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18
-                        }}>📜</div>
-                        <div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Final Legal Document</div>
-                            <div style={{ fontSize: 11, color: t.textMuted }}>{doc.caseCategory} Dispute</div>
-                        </div>
-                    </div>
-                    <span style={{
-                        fontSize: 11, padding: "3px 10px", borderRadius: 20,
-                        background: t.primaryGlow, color: t.primary, border: `1px solid ${t.primary}40`, fontWeight: 700
-                    }}>
-                        ✦ Final
-                    </span>
+                <div aria-label="Approved document">
+                    <ReviewPdfView url={previewUrl} label="The approved version" tools={tools} onTools={setTools} />
                 </div>
-
-                {/* Document — the REAL approved PDF, rendered inline. */}
-                <div style={{
-                    background: "#fff", borderRadius: 12, border: `1px solid ${t.border}`,
-                    overflow: "hidden", marginBottom: 16, minHeight: 420
-                }}>
-                    {previewUrl ? (
-                        <iframe title="Approved document" src={previewUrl}
-                            style={{ width: "100%", height: 460, border: "none", display: "block" }} />
-                    ) : (
-                        <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 420, display: "flex", alignItems: "center", justifyContent: "center" }}>Loading the approved document…</div>
-                    )}
-                    {/* Footer */}
-                    <div style={{
-                        padding: "12px 24px", borderTop: `1px solid ${t.border}`,
-                        display: "flex", justifyContent: "space-between", alignItems: "center"
-                    }}>
-                        <span style={{ fontSize: 11, color: t.textFaint }}>🖊 Approved by Lawyer · {lawyerName}</span>
-                        {/* When the decision was RECORDED — not today's date,
-                            which is what this used to print. */}
-                        <span style={{ fontSize: 11, color: t.textFaint }}>📅 {approvedOn || "Date not recorded"}</span>
-                    </div>
-                </div>
-
-                {/* Export. PDF / Email / Print had no handlers and did nothing;
-                    only the revision-bound download is real, so only it is shown. */}
-                <div style={{ display: "flex", gap: 8 }}>
-                    <DownloadPdfButton doc={doc} t={t} style={{
-                        padding: "10px 0", borderRadius: 10,
-                        border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
-                        fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
-                    }} />
-                </div>
-            </div>
-
-            {/* Right — summary */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "22px 18px", overflowY: "auto" }}>
-
-                {/* Complete card */}
-                <div style={{
-                    background: "linear-gradient(135deg,rgba(64,240,220,0.12),rgba(77,212,163,0.1))",
-                    border: `1px solid ${t.primary}30`, borderRadius: 12, padding: "18px 16px", textAlign: "center"
-                }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>🎉</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: t.primary, marginBottom: 4 }}>Document Complete</div>
-                    <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 10 }}>Reviewed and approved by you</div>
-                    <span style={{
-                        fontSize: 11, padding: "3px 10px", borderRadius: 20,
-                        background: t.primaryGlow, color: t.primary, border: `1px solid ${t.primary}40`, fontWeight: 700
-                    }}>
-                        ✦ Final Version
-                    </span>
-                </div>
-
-                {/* Summary */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 10
-                    }}>Document Summary</div>
-                    {[
-                        ["Type", doc.type],
-                        ["Template", doc.title.split(" — ")[0]],
-                        ["Case Ref", doc.caseRawId ? doc.caseId : "None — standalone document"],
-                        ["Client", doc.client],
-                        ["Reviewer", `${lawyerName}, Advocate`],
-                        ["Status", "Final"],
-                        // What pleading_rules found, frozen at generation. Your
-                        // approval is not a statutory check and is not shown as one.
-                        ["Required particulars", particulars.label],
-                    ].map(([k, v]) => (
-                        <div key={k} style={{
-                            display: "flex", justifyContent: "space-between", padding: "5px 0",
-                            borderBottom: `1px solid ${t.border}20`
-                        }}>
-                            <span style={{ fontSize: 11, color: t.textFaint }}>{k}</span>
-                            <span style={{
-                                fontSize: 11, fontWeight: 600,
-                                color: k === "Status" ? t.primary
-                                    : k === "Required particulars" ? _PARTICULARS_COLOR(t)[particulars.tone]
-                                    : t.textDim
-                            }}>{v}</span>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Workflow complete */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 10
-                    }}>Workflow Complete</div>
-                    {[
-                        "Document Received",
-                        "AI Draft Generated",
-                        "Lawyer Review",
-                        "Decision: Approved",
-                        "Client Notified",
-                        "Final Export Ready",
-                    ].map((item, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
-                            <div style={{
-                                width: 18, height: 18, borderRadius: "50%",
-                                background: `${t.primary}20`, border: `1.5px solid ${t.primary}60`,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 9, color: t.primary, flexShrink: 0
-                            }}>✓</div>
-                            <span style={{ fontSize: 11, color: t.textDim }}>{item}</span>
-                        </div>
-                    ))}
-                </div>
-
-                <Btn full variant="secondary" onClick={onBack}>← Back to Inbox</Btn>
             </div>
         </div>
     );
@@ -1310,6 +1295,8 @@ function _mapQueueDoc(d) {
         fieldShape: d.field_shape ?? null,
         // The client edited the wording: read it as text, not as the template.
         textEdited: Boolean(d.text_edited),
+        // Came from a quick review request: the client has not hired this lawyer.
+        quickReview: Boolean(d.quick_review),
         submittedRevisionId: d.submitted_revision_id ?? null,
         submittedPdfSha256: d.submitted_pdf_sha256 ?? null,
 
@@ -1457,6 +1444,16 @@ function DocWorkflowApp() {
     };
     useEffect(() => { load().catch(() => setLoading(false)); }, []);
 
+    // Quick review requests waiting for this lawyer's answer.
+    const [quick, setQuick] = useState(null);
+    const [quickBusy, setQuickBusy] = useState(null);
+    const loadQuick = async () => {
+        const r = await Promise.resolve(quickReviewInbox()).catch(() => null);
+        if (!r || r.error) { setQuick([]); return; }
+        setQuick(Array.isArray(r.data) ? r.data : (r.data?.items || []));
+    };
+    useEffect(() => { loadQuick(); }, []);
+
     /* Switching tabs is a NEW query, not a filter over the old one.
      *
      * The cursor is reset because it names a position in the tab being left and
@@ -1474,8 +1471,30 @@ function DocWorkflowApp() {
         load(null, tab).catch(() => setLoading(false));
     };
 
-    const openDoc = (doc) => { setActiveDoc(doc); setScreen(doc.status === "Approved" ? "final" : "review"); };
-    const reset = () => { setScreen("inbox"); setActiveDoc(null); };
+    const openDoc = (doc, keepTrail = false) => {
+        setActiveDoc(doc); setScreen(doc.status === "Approved" ? "final" : "review");
+        if (!keepTrail) setTrail([]);
+    };
+    // The documents left with "Next", newest last, so "Previous" can go back.
+    const [trail, setTrail] = useState([]);
+    // "Next document": the next one still waiting for a decision, in the
+    // inbox's work order. It never leads onto a finished document -- that read
+    // as the open document's own next page. Hidden when nothing else waits.
+    const others = activeDoc ? docs.filter(d => d.id !== activeDoc.id) : [];
+    const waitingOthers = workOrder(others.filter(d => d.status === "Pending Review"));
+    const nextUp = waitingOthers[0] || null;
+    const next = nextUp ? {
+        title: nextUp.title,
+        count: waitingOthers.length,
+        position: `${waitingOthers.length} waiting`,
+        open: () => { setTrail(tr => [...tr, activeDoc.id]); openDoc(nextUp, true); },
+    } : null;
+    const prevDoc = trail.length ? docs.find(d => d.id === trail[trail.length - 1]) : null;
+    const prev = prevDoc ? {
+        title: prevDoc.title,
+        open: () => { setTrail(tr => tr.slice(0, -1)); openDoc(prevDoc, true); },
+    } : null;
+    const reset = () => { setScreen("inbox"); setActiveDoc(null); setTrail([]); };
 
     // FROM A NOTIFICATION, STRAIGHT TO THE DOCUMENT (2026-10-09). The bell used
     // to land on the inbox and leave the lawyer to find the row. App.jsx leaves
@@ -1487,9 +1506,31 @@ function DocWorkflowApp() {
             return id || null;
         } catch { return null; }
     });
+    // Accepting submits the document to this lawyer; it then opens like any
+    // pending document, from a fresh read of the queue.
+    const acceptQuick = async r => {
+        setQuickBusy(r.id);
+        const { error } = await acceptQuickReview(r.id) || {};
+        setQuickBusy(null);
+        loadQuick();
+        if (error) { showToast("❌ " + (error.message || "Could not accept the request")); return; }
+        showToast("✅ Accepted — the client has been notified");
+        setWantDoc(r.doc_id);
+        if (statusF === "All" || statusF === "Pending Review") load().catch(() => {});
+        else changeTab("All");
+    };
+    const declineQuick = async r => {
+        setQuickBusy(r.id);
+        const { error } = await declineQuickReview(r.id) || {};
+        setQuickBusy(null);
+        loadQuick();
+        showToast(error ? "❌ " + (error.message || "Could not decline the request") : "Declined — the client has been told");
+    };
     // The latest load, for listeners registered once.
     const loadRef = useRef(load);
     loadRef.current = load;
+    const loadQuickRef = useRef(loadQuick);
+    loadQuickRef.current = loadQuick;
     useEffect(() => {
         const onOpen = e => {
             try { sessionStorage.removeItem("attorney:lawyer-open-doc"); } catch { /* storage off */ }
@@ -1500,6 +1541,7 @@ function DocWorkflowApp() {
         // on it, instead of only when they navigate away and back.
         const off = onNotification(n => {
             if (String(n?.type || "").startsWith("document_")) loadRef.current().catch(() => {});
+            if (String(n?.type || "").startsWith("quick_review_")) loadQuickRef.current();
         });
         return () => { window.removeEventListener("attorney:open-review-doc", onOpen); off(); };
     }, []);
@@ -1527,20 +1569,28 @@ function DocWorkflowApp() {
     // Approve twice — or a retry after a dropped response — records one
     // transition. A fresh key per attempt would make the receipt machinery
     // unreachable from here.
-    const handleDecide = async (action, note, key = null) => {
+    const handleDecide = async (action, note, key = null, edits = null) => {
         const idemKey = key || idempotencyKey();
         setBusy(true);
 
         const canUseV2 = activeDoc.submittedVersion != null
             && !!activeDoc.submittedPdfSha256;
-        const { data, error, status } = canUseV2
+        const sent = edits && canUseV2
+            ? await returnWithEditsV2(activeDoc.id, {
+                bodyHtml: edits,
+                note,
+                expectedVersion: activeDoc.submittedVersion,
+                expectedPdfSha256: activeDoc.submittedPdfSha256,
+            }, idemKey)
+            : null;
+        const { data, error, status } = sent || (canUseV2
             ? await reviewDocumentV2(activeDoc.id, {
                 action,
                 expectedVersion: activeDoc.submittedVersion,
                 expectedPdfSha256: activeDoc.submittedPdfSha256,
                 note,
             }, idemKey)
-            : await reviewDocument(activeDoc.id, { action, note });
+            : await reviewDocument(activeDoc.id, { action, note }));
         setBusy(false);
 
         if (error) {
@@ -1561,6 +1611,12 @@ function DocWorkflowApp() {
                     + "will not change this.");
                 return;
             }
+            if (edits && status === 409 && error?.message) {
+                // Edits refused for a stated reason (the client changed it, the
+                // text can't be edited): the server's words, not a generic one.
+                setStaleWarning(error.message);
+                return;
+            }
             if (status === 409 || code === "conflict" || code === "stale_revision") {
                 setStaleWarning(
                     "This document changed after you opened it. Reload the queue "
@@ -1570,7 +1626,7 @@ function DocWorkflowApp() {
             if (status === 503) {
                 // The work may or may not have been recorded, which is exactly
                 // what the key is for — the retry reuses it.
-                setRetry({ action, note, key: idemKey });
+                setRetry({ action, note, key: idemKey, edits });
                 showToast("⏳ The service is busy. Retry when ready.");
                 return;
             }
@@ -1581,10 +1637,11 @@ function DocWorkflowApp() {
             return;
         }
 
-        const newLabel = _REVIEW_STATUS_LABEL[data?.review_status] ||
+        const newLabel = _REVIEW_STATUS_LABEL[(edits ? data?.review : data)?.review_status] ||
             (action === "approve" ? "Approved" : action === "return" ? "Returned" : "Rejected");
         setDocs(prev => prev.map(d => d.id === activeDoc.id ? { ...d, status: newLabel, lawyerNote: note || "" } : d));
-        showToast(`✅ ${newLabel} — the client has been notified`);
+        showToast(edits ? "✅ Returned with your edits — the client has been notified"
+            : `✅ ${newLabel} — the client has been notified`);
         setRetry(null);
         reset();
         // The decision moved the document between tabs and changed the counts:
@@ -1603,25 +1660,21 @@ function DocWorkflowApp() {
             background: t.bg, fontFamily: "DM Sans,system-ui,sans-serif", color: t.text
         }}>
 
-            {screen !== "inbox" && <Stepper step={screen} t={t} />}
-
             {screen === "inbox" && <ScreenInbox t={t} onOpen={openDoc} docs={docs}
                 loading={loading} hasMore={!!queueCursor} loadingMore={loadingMore}
                 onLoadMore={() => load(queueCursor)}
                 statusF={statusF} onStatusChange={changeTab}
-                counts={queueCounts} serverFiltered={serverFiltered} />}
+                counts={queueCounts} serverFiltered={serverFiltered}
+                quick={quick} quickBusy={quickBusy} onAcceptQuick={acceptQuick} onDeclineQuick={declineQuick} />}
+            {/* Review and decision are one screen (2026-10-11): the document
+                stays in view while the lawyer decides. */}
             {screen === "review" && activeDoc && (
-                <ScreenReview doc={activeDoc} t={t}
-                    onBack={() => setScreen("inbox")}
-                    onContinue={() => setScreen("decision")} />
-            )}
-            {screen === "decision" && activeDoc && (
-                <ScreenDecision doc={activeDoc} t={t} busy={busy}
-                    onBack={() => setScreen("review")}
+                <ScreenReview key={activeDoc.id} doc={activeDoc} t={t} busy={busy}
+                    onBack={reset} next={next} prev={prev}
                     onDecide={handleDecide} />
             )}
             {screen === "final" && activeDoc && (
-                <ScreenFinal doc={activeDoc} t={t} onBack={reset} />
+                <ScreenFinal key={activeDoc.id} doc={activeDoc} t={t} onBack={reset} next={next} prev={prev} />
             )}
 
             {/* THE DOCUMENT MOVED.
@@ -1664,7 +1717,7 @@ function DocWorkflowApp() {
                 }}>
                     <span>The service was busy and your decision was not recorded.</span>
                     <button
-                        onClick={() => handleDecide(retry.action, retry.note, retry.key)}
+                        onClick={() => handleDecide(retry.action, retry.note, retry.key, retry.edits)}
                         disabled={busy}
                         style={{
                             background: t.primary, color: "#fff", border: "none",
