@@ -29,10 +29,27 @@ const MAX_SIGNATURE_CHARS = 200_000;
 const MAX_IMAGE_BYTES = Math.floor((MAX_SIGNATURE_CHARS - 64) * 3 / 4);
 const MAX_IMAGE_LABEL = `${Math.floor(MAX_IMAGE_BYTES / 1024)} KB`;
 
+/* Line icons (Lucide, ISC licence) in place of the emoji that stood here --
+ * a ✍️ rendered at low opacity on the canvas read as a squiggle, not a hand. */
+const PATHS = {
+    draw: ["M12 20h9", "M16.38 3.62a1 1 0 0 1 3 3L7.37 18.64a2 2 0 0 1-.86.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.86z"],
+    type: ["M12 4v16", "M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2", "M9 20h6"],
+    upload: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M17 8l-5-5-5 5", "M12 3v12"],
+    clear: ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5"],
+    signature: ["M21 17l-2.156-1.868A.5.5 0 0 0 18 15.5v.5a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1c0-2.545-3.991-3.97-8.5-4a1 1 0 0 0 0 5c4.153 0 4.745-11.295 5.708-13.5a2.5 2.5 0 1 1 3.31 3.284", "M3 21h18"],
+    image: ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z", "M21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21"],
+};
+const Icon = ({ name, size = 16 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9}
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+        {PATHS[name].map((d, i) => <path key={i} d={d} />)}
+    </svg>
+);
+
 const MODES = [
-    ["draw", "✏️", "Draw"],
-    ["type", "Aa", "Type"],
-    ["upload", "📎", "Upload"],
+    ["draw", "Draw"],
+    ["type", "Type"],
+    ["upload", "Upload"],
 ];
 
 /* The server's vocabulary, not ours. */
@@ -159,32 +176,42 @@ export default function SignaturePad({ onChange, height = 200 }) {
 
     return (
         <div>
-            {/* Mode tabs + clear */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-                <div style={{
-                    display: "flex", background: t.inputBg,
-                    border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2,
+            {/* Mode tabs + clear: one even segmented control across the top,
+                Clear apart on the right and quiet until there is something
+                to clear. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <div role="tablist" aria-label="How to sign" style={{
+                    display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 1 360px",
+                    background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: 4, gap: 4,
                 }}>
-                    {MODES.map(([m, ico, lbl]) => (
-                        <button key={m} type="button"
-                            onClick={() => { setMode(m); setUploadError(null); }}
-                            style={{
-                                display: "flex", alignItems: "center", gap: 5,
-                                padding: "6px 12px", borderRadius: 8, fontSize: 12,
-                                fontWeight: mode === m ? 700 : 500, border: "none",
-                                background: mode === m ? t.primary : "transparent",
-                                color: mode === m ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted,
-                                cursor: "pointer", transition: "all 0.2s",
-                            }}>
-                            <span style={{ fontSize: 13 }}>{ico}</span>{lbl}
-                        </button>
-                    ))}
+                    {MODES.map(([m, lbl]) => {
+                        const on = mode === m;
+                        return (
+                            <button key={m} type="button" role="tab" aria-selected={on}
+                                onClick={() => { setMode(m); setUploadError(null); }}
+                                style={{
+                                    display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                                    height: 34, borderRadius: 9, fontSize: 13, fontWeight: on ? 700 : 600,
+                                    border: "none", fontFamily: "inherit",
+                                    background: on ? t.primary : "transparent",
+                                    color: on ? (t.mode === "dark" ? "#0b2b26" : "#fff") : t.textMuted,
+                                    boxShadow: on ? `0 6px 14px -8px ${t.primary}` : "none",
+                                    cursor: "pointer", transition: "background .2s, color .2s",
+                                }}>
+                                <Icon name={m} size={15} />{lbl}
+                            </button>
+                        );
+                    })}
                 </div>
-                <button type="button" onClick={clear} style={{
-                    padding: "7px 13px", borderRadius: 9, fontSize: 12,
-                    border: `1px solid ${t.border}`, background: "transparent",
-                    color: t.textMuted, cursor: "pointer",
-                }}>↺ Clear</button>
+                <span style={{ flex: 1 }} />
+                <button type="button" onClick={clear} disabled={!drawn && !typed && !uploaded}
+                    title="Clear the signature" style={{
+                        display: "flex", alignItems: "center", gap: 6, height: 36, padding: "0 13px",
+                        borderRadius: 10, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit",
+                        border: `1px solid ${t.border}`, background: "transparent",
+                        color: t.textMuted, cursor: (!drawn && !typed && !uploaded) ? "default" : "pointer",
+                        opacity: (!drawn && !typed && !uploaded) ? 0.45 : 1,
+                    }}><Icon name="clear" size={14} />Clear</button>
             </div>
 
             {mode === "draw" && (
@@ -211,7 +238,7 @@ export default function SignaturePad({ onChange, height = 200 }) {
                             alignItems: "center", justifyContent: "center",
                             pointerEvents: "none",
                         }}>
-                            <div style={{ fontSize: 24, opacity: 0.25 }}>✍️</div>
+                            <div style={{ color: t.primary, opacity: 0.45 }}><Icon name="signature" size={30} /></div>
                             <div style={{ fontSize: 12.5, color: t.textFaint }}>Draw your signature here</div>
                             <div style={{ fontSize: 11, color: t.textFaint, opacity: 0.7 }}>Mouse or touch</div>
                         </div>
@@ -264,8 +291,8 @@ export default function SignaturePad({ onChange, height = 200 }) {
                             <div style={{
                                 width: 48, height: 48, borderRadius: 14,
                                 background: t.primaryGlow, border: `1.5px dashed ${t.primary}`,
-                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21,
-                            }}>📎</div>
+                                display: "flex", alignItems: "center", justifyContent: "center", color: t.primary,
+                            }}><Icon name="image" size={22} /></div>
                             <div style={{ textAlign: "center" }}>
                                 <div style={{ fontSize: 13.5, fontWeight: 600, color: t.text }}>
                                     Upload a signature image
