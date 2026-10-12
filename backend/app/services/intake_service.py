@@ -248,6 +248,18 @@ async def get_clarification(
     else:
         case_type = step2.get("case_type", "civil")
 
+    # AN ANSWER WITH NO QUESTION TO ANSWER IS A RE-SEND, NOT A NEW ROUND.
+    #
+    # The client re-sends its last answer before /convert, in case the call
+    # that carried it was lost. When the model had already said DONE (fewer
+    # than four rounds), that answer was stored long ago and nothing is
+    # outstanding -- and this function used to carry on and ask the model for
+    # another question. The intake then gained an unanswered question the
+    # client never saw, and the analysis folded it in as "(no answer)".
+    if answer and not (qa_list and qa_list[-1].get("a") is None):
+        answered = sum(1 for qa in qa_list if qa.get("a"))
+        return {"question": None, "done": True, "round": answered}
+
     # Save the answer to the last unanswered question
     if answer and qa_list and qa_list[-1].get("a") is None:
         qa_list[-1]["a"] = answer.strip()
@@ -895,7 +907,10 @@ async def _run_intake_ai(
             "summary":             "AI structuring unavailable — case created successfully.",
             "applicable_laws":     [],
             "recommended_actions": ["Consult a qualified Pakistani lawyer for advice."],
-            "risk_level":          "medium",
+            # Nothing assessed the risk, so nothing is claimed. This was a
+            # fixed "medium", which the client saw as a risk reading of their
+            # case on the very screen that says the analysis did not run.
+            "risk_level":          None,
             "grounded":            False,
             "grounding_status":    "pipeline_failed",
             "law_citations":       [],

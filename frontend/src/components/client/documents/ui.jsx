@@ -34,8 +34,12 @@ export const MOCKUP_DARK = {
  * !important because the shared primitives set their font inline.
  * `data-keep-font` opts an element out (a serif heading, a monospace citation). */
 export const DOCS_FONT = "'Nunito Sans', 'Avenir Next', Avenir, system-ui, sans-serif";
-export const DOCS_FONT_CSS = `[data-docs-font], [data-docs-font] *:not([data-keep-font]) { font-family: ${DOCS_FONT} !important; }`;
+// The Vault (2026-10-10) is the lawyer Vault's design and keeps its own type
+// (documents/vaultTheme.js), so it is left out of this rule.
+export const DOCS_FONT_CSS = `[data-docs-font], [data-docs-font] *:not([data-keep-font]):not([data-client-vault]):not([data-client-vault] *):not([data-drafts-side]):not([data-drafts-side] *) { font-family: ${DOCS_FONT} !important; }`;
 
+// A theme already on the client dashboard's tokens (clientTheme.js) is used as
+// is, so Documents matches the rest of the dashboard.
 export function docsTheme(t) {
-    return t && t.mode === "dark" ? { ...t, ...MOCKUP_DARK } : t;
+    return t && t.mode === "dark" && !t.onTokens ? { ...t, ...MOCKUP_DARK } : t;
 }

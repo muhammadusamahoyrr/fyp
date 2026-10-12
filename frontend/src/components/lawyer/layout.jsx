@@ -204,7 +204,7 @@ function NavItem({ item, page, setPage, collapsed, counts, sub = false }) {
             aria-current={active ? "page" : undefined}
             title={collapsed ? item.label : undefined}>
             <span className="ln-ic">
-                <Icon d={navIcon(item.icon)} size={sub ? 18 : 21} />
+                <Icon d={navIcon(item.icon)} size={sub ? 17 : 19} />
                 {collapsed && count > 0 && <i className="ln-dot" />}
             </span>
             {!collapsed && (
@@ -227,7 +227,7 @@ function NavGroup({ group, items, page, setPage, collapsed, counts, open, onTogg
             <button type="button" className={`ln-item${holdsPage ? " on" : ""}`} title={group.label}
                 onClick={() => onExpand(group.id)}>
                 <span className="ln-ic">
-                    <Icon d={navIcon(group.icon)} size={21} />
+                    <Icon d={navIcon(group.icon)} size={19} />
                     {total > 0 && <i className="ln-dot" />}
                 </span>
             </button>
@@ -237,7 +237,7 @@ function NavGroup({ group, items, page, setPage, collapsed, counts, open, onTogg
         <div className={`ln-group${open ? " open" : ""}`}>
             <button type="button" className={`ln-item ln-head${holdsPage ? " holds" : ""}`}
                 aria-expanded={open} onClick={() => onToggle(group.id)}>
-                <span className="ln-ic"><Icon d={navIcon(group.icon)} size={21} /></span>
+                <span className="ln-ic"><Icon d={navIcon(group.icon)} size={19} /></span>
                 <span className="ln-label">{group.label}</span>
                 {!open && total > 0 && <span className="ln-badge sum">{total}</span>}
                 <span className="ln-chev" aria-hidden="true"><Icon d={I.chevronDown} size={15} /></span>
@@ -255,7 +255,7 @@ function NavGroup({ group, items, page, setPage, collapsed, counts, open, onTogg
 
 // Scoped to the sidebar; colours follow the lawyer theme's tokens.
 const NAV_CSS = `
-[data-sidebar] .ln-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;height:44px;padding:0 12px;margin:1px 0;border:0;border-radius:10px;background:transparent;color:var(--ln-dim);font:inherit;font-size:14.5px;font-weight:550;text-align:left;cursor:pointer;transition:background .15s,color .15s}
+[data-sidebar] .ln-item{position:relative;display:flex;align-items:center;gap:11px;width:100%;height:38px;padding:0 10px;margin:2px 0;border:0;border-radius:9px;background:transparent;color:var(--ln-dim);font:inherit;font-size:14.5px;font-weight:550;text-align:left;cursor:pointer;transition:background .15s,color .15s}
 [data-sidebar] .ln-item:hover{background:var(--ln-hover);color:var(--ln-ink)}
 [data-sidebar] .ln-ic{position:relative;width:24px;height:24px;flex:none;display:grid;place-items:center;color:var(--ln-muted);transition:color .15s}
 [data-sidebar] .ln-item:hover .ln-ic{color:var(--ln-ink)}
@@ -269,10 +269,10 @@ const NAV_CSS = `
 [data-sidebar] .ln-rail{position:relative;margin:2px 0 6px 23px;padding-left:10px;animation:lnIn .18s ease-out}
 [data-sidebar] .ln-rail::after{content:"";position:absolute;left:0;top:-11px;bottom:0;width:1px;background:var(--ln-line);pointer-events:none}
 @keyframes lnIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-[data-sidebar] .ln-item.sub{height:38px;padding:0 10px;gap:10px;font-size:13.5px;font-weight:520}
+[data-sidebar] .ln-item.sub{height:33px;padding:0 10px;gap:10px;font-size:13.5px;font-weight:520}
 [data-sidebar] .ln-item.sub.on{background:var(--ln-hover);color:var(--ln-accent);font-weight:650}
 [data-sidebar] .ln-item.sub.on .ln-ic{color:var(--ln-accent)}
-[data-sidebar] .ln-item.sub.on::before{content:"";position:absolute;left:-10.5px;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--ln-accent);z-index:1}
+[data-sidebar] .ln-item.sub.on::before{content:"";position:absolute;left:-10.5px;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--ln-accent);z-index:1}
 [data-sidebar] .ln-badge{flex:none;min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;border-radius:999px;background:var(--ln-danger);color:#fff;font-size:11px;font-weight:700}
 [data-sidebar] .ln-badge.pending{background:#F2C35E;color:#1A2B3F}
 [data-sidebar] .ln-badge.sum{background:var(--ln-hover);color:var(--ln-ink);border:1px solid var(--ln-line)}

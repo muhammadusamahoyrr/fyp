@@ -22,6 +22,7 @@ from app.api.v1.routes import (
     bail,
     billing,
     calculators,
+    case_files,
     cases,
     causelist,
     citator,
@@ -42,6 +43,7 @@ from app.api.v1.routes import (
     payments,
     conversations,
     provenance,
+    quick_review,
     review_requests,
     users,
     voice,
@@ -646,6 +648,8 @@ app.include_router(ai.router, prefix=API_PREFIX)
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(cases.router, prefix=API_PREFIX)
+app.include_router(case_files.router, prefix=API_PREFIX)  # a lawyer's private files on a case
+app.include_router(quick_review.router, prefix=API_PREFIX)  # one-off review by a lawyer not hired
 app.include_router(intake.router, prefix=API_PREFIX)
 app.include_router(lawyers.router, prefix=API_PREFIX)
 # BEFORE `documents.router`: that router's GET /documents/{doc_id} would

@@ -107,6 +107,7 @@ async def search_lawyers(
     q: str | None = None,
     bar_number: str | None = None,
     sort: str | None = None,
+    specialization: str | None = None,
 ):
     """The lawyer directory: filtered, sorted and paged by the DATABASE.
 
@@ -130,6 +131,7 @@ async def search_lawyers(
     result = await user_repo.find_lawyers(
         province=province,
         case_type=case_type,
+        specialization=specialization,
         min_rating=min_rating,
         availability=availability,
         page=page,

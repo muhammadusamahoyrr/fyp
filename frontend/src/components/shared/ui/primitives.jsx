@@ -83,7 +83,7 @@ export function Btn({ kind = "ghost", children, style, ...rest }) {
         opacity: rest.disabled ? 0.55 : 1,
     };
     const kinds = {
-        primary: { background: t.primary, color: onPrimary(t), border: "none" },
+        primary: { background: t.primaryFill || t.primary, color: t.onPrimaryFill || onPrimary(t), border: "none" },
         ghost: { background: "transparent", color: t.textDim || t.text, border: `1px solid ${t.ghostBorder || t.border}` },
         quiet: { background: "transparent", color: t.textMuted, border: "1px solid transparent" },
         danger: { background: "transparent", color: t.danger, border: `1px solid ${t.danger}66` },

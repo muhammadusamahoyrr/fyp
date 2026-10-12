@@ -74,8 +74,8 @@ test("Cases shows each backend status by name, and closed cases under History", 
 
     // Closed cases are not mixed into the live list; History shows them.
     assert.ok(!pills().includes("Closed"), "a closed case is listed with the live ones");
-    const history = [...view.container.querySelectorAll("button")].find(b => b.textContent.startsWith("History"));
-    assert.match(history.textContent, /Closed 1/);
+    const history = [...view.container.querySelectorAll("button")].find(b => b.getAttribute("role") === "tab" && b.textContent.trim().startsWith("Closed"));  // the Closed view (was "History · Closed")
+    assert.match(history.textContent, /Closeds*1/);
     await act(async () => { history.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     assert.ok(pills().includes("Closed"), "History does not show the closed case");
     await view.unmount();

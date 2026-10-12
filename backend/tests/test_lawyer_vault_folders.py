@@ -192,9 +192,41 @@ async def test_a_lawyer_deletes_and_restores_their_own_document_through_the_rout
     assert doc in [d["id"] for d in (await client.get("/documents/v2/mine")).json()["items"]]
 
 
-async def test_folder_routes_are_lawyer_only_and_off_with_the_feature(http, monkeypatch):
+async def test_a_client_has_the_same_folders_over_their_own_documents(http):
+    """2026-10-10: the client Vault has folders too. Ownership, not role, is the
+    guard: a client files only their own documents, into their own folders."""
     client, actor = http
-    actor["role"] = "client"
+    actor.update({"_id": CLIENT, "role": "client"})
+    mine = await seed(CLIENT, title="Rent agreement")
+    made = await client.post("/documents/v2/folders", json={"name": "Tenancy"})
+    assert made.status_code == 201
+    folder = made.json()["id"]
+    assert (await client.put(f"/documents/v2/{mine}/folder", json={"folder_id": folder})).status_code == 200
+    assert [d["id"] for d in (await client.get(f"/documents/v2/mine?folder={folder}")).json()["items"]] == [mine]
+    assert [(f["name"], f["document_count"]) for f in (await client.get("/documents/v2/folders")).json()["items"]] == [("Tenancy", 1)]
+    assert (await client.delete(f"/documents/v2/folders/{folder}")).json()["documents_unfiled"] == 1
+
+
+async def test_a_client_never_reaches_a_lawyers_folder_or_document(http):
+    client, actor = http
+    lawyer_doc = await seed(LAWYER, title="Lawyer's own draft")
+    lawyer_folder = (await df.create_folder(owner_id=LAWYER, name="Bail"))["id"]
+    actor.update({"_id": CLIENT, "role": "client"})
+    assert (await client.get("/documents/v2/folders")).json()["items"] == []
+    for res in [await client.patch(f"/documents/v2/folders/{lawyer_folder}", json={"name": "Mine now"}),
+                await client.delete(f"/documents/v2/folders/{lawyer_folder}"),
+                await client.put(f"/documents/v2/{lawyer_doc}/folder", json={"folder_id": None})]:
+        assert res.status_code == 404 and res.json()["error"]["code"] == "not_found"
+    own = (await client.post("/documents/v2/folders", json={"name": "Mine"})).json()["id"]
+    res = await client.put(f"/documents/v2/{lawyer_doc}/folder", json={"folder_id": own})
+    assert res.status_code == 404
+    assert (await get_document_folders_col().find_one({"_id": lawyer_folder}))["name"] == "Bail"
+    assert "folder_id" not in await get_documents_col().find_one({"_id": lawyer_doc})
+
+
+async def test_folder_routes_refuse_other_roles_and_are_off_with_the_feature(http, monkeypatch):
+    client, actor = http
+    actor["role"] = "admin"
     assert (await client.get("/documents/v2/folders")).status_code == 403
     monkeypatch.setattr(settings, "documents_v2", False)
     for method, path in [("GET", "/documents/v2/folders"), ("POST", "/documents/v2/folders"),

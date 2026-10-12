@@ -221,9 +221,9 @@ test("the idempotency key is minted per decision and reused by the retry", () =>
     const fn = lawyer.slice(lawyer.indexOf("const handleDecide"));
     const body = fn.slice(0, fn.indexOf("\n    };"));
     assert.match(body, /const idemKey = key \|\| idempotencyKey\(\);/);
-    assert.match(body, /setRetry\(\{ action, note, key: idemKey \}\)/,
+    assert.match(body, /setRetry\(\{ action, note, key: idemKey(, edits)? \}\)/,
         "the retry does not carry the original key");
-    assert.match(lawyer, /handleDecide\(retry\.action, retry\.note, retry\.key\)/,
+    assert.match(lawyer, /handleDecide\(retry\.action, retry\.note, retry\.key(, retry\.edits)?\)/,
         "the retry button mints a new key");
 });
 
@@ -836,8 +836,10 @@ test("the flag being off is explained, not reported as a failure", () => {
 });
 
 test("the filed PDF is fetched by revision and hash", () => {
-    const idx = automation.indexOf("published && (");
-    const panel = automation.slice(idx, idx + 900);
+    // In the Save menu since 2026-10-11 ("Saved PDF — download").
+    const idx = automation.indexOf("{published && <>");
+    assert.ok(idx > 0, "the saved copy's download is gone");
+    const panel = automation.slice(idx, idx + 1400);
     assert.match(panel, /revisionId: published\.revisionId/);
     assert.match(panel, /expectedPdfSha256: published\.pdfSha256/);
 });

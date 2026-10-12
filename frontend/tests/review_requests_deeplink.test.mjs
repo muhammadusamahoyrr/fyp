@@ -174,8 +174,9 @@ test("feature off: the link lands on the ordinary Vault, with no review or Analy
     assert.ok(p.container.querySelector('[data-vault-row="d1"]'), "the ordinary Vault is shown");
     const tabs = [...p.container.querySelectorAll('[role="tab"]')].map(t => t.textContent);
     assert.ok(!tabs.includes("Review requests"));
-    assert.equal(tabs.find((_, i) => p.container.querySelectorAll('[role="tab"]')[i]
-        .getAttribute("aria-selected") === "true"), "All Documents");
+    // The tab carries its count beside the label (Vault redesign).
+    assert.match(tabs.find((_, i) => p.container.querySelectorAll('[role="tab"]')[i]
+        .getAttribute("aria-selected") === "true") || "", /^All documents/);
     assert.equal(p.container.querySelectorAll("[data-request-review]").length, 0);
     assert.equal(p.container.querySelector("[data-rr-not-found]"), null);
     assert.equal(api.__calls("getReviewRequest").length, 0);

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.core.constants import SignatureMethod
@@ -57,6 +58,9 @@ class AgreementCreate(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=_MAX_TITLE)
     body_html: str = Field(..., min_length=1, max_length=_MAX_BODY)
+    # "html" only from the builder's rich editor, and only canonical (see
+    # agreement_html). Absent means the plain text every row had until now.
+    body_format: Literal["plain_text", "html"] = "plain_text"
     party_ids: list[PartyInput]
     # The case this agreement belongs to. Optional at the schema level because
     # the internal engagement-letter producer supplies it separately, but the
@@ -154,6 +158,9 @@ class AgreementOut(BaseModel):
     id: str = Field(alias="_id")
     title: str | None = None
     body_html: str | None = None
+    # How to show `body_html`: "html" is sanitised markup, anything else is
+    # plain text. A row from before the field existed has none: plain text.
+    body_format: str | None = None
     eto_classification: str | None = None
     case_id: str | None = None
     engagement_id: str | None = None
@@ -356,3 +363,15 @@ class InvitationSign(InvitationToken):
     method: SignatureMethod
     signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
     consent: bool
+
+
+class BodyPreview(BaseModel):
+    """A rich body to canonicalise before Review (see agreement_html)."""
+    model_config = ConfigDict(extra="forbid")
+
+    body_html: str = Field(..., min_length=1, max_length=_MAX_BODY)
+
+
+class BodyPreviewOut(BaseModel):
+    body_html: str
+    has_text: bool

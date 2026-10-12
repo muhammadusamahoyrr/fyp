@@ -421,7 +421,8 @@ test("drafts history lists the client's real documents and opens them", async ()
     const row = p.container.querySelector('[data-doc="d1"]');
     assert.ok(row, "a real document is missing from History");
     assert.match(row.textContent, /Under Review/);
-    assert.doesNotMatch(p.container.textContent, /2 drafts/);
+    // The footer, as the lawyer AI sidebar's (2026-10-10): who sees them, and how many.
+    assert.match(p.container.querySelector("[data-side-foot]").textContent, /Drafts are private to you\s*2 drafts/);
     // The start screen: type, linked case and the prompt, as in the design.
     const caseSelect = p.container.querySelector("#docs-dcase");
     assert.ok([...caseSelect.options].some(o => o.textContent === "Standalone"));
@@ -750,7 +751,7 @@ test("the history menu deletes the history after confirming, and it can be resto
     }
 });
 
-test("the vault header, stats and sort follow the reference layout", async () => {
+test("the vault header, stats and sort follow the lawyer Vault (2026-10-10)", async () => {
     const { addedThisWeek, sortRows } = await import("../src/components/client/documents/DocsVault.jsx");
     const now = new Date("2026-09-29T12:00:00Z");
     assert.equal(addedThisWeek([{ created_at: "2026-09-28T10:00:00Z" }, { created_at: "2026-09-01T10:00:00Z" }, {}], now), 1);
@@ -764,16 +765,20 @@ test("the vault header, stats and sort follow the reference layout", async () =>
 
     api.__respond("myDocumentsV2", { data: { items: ROWS, has_more: false } });
     const p = await mount(DocsVault, { onBack: () => {}, onOpen: () => {} });
-    assert.match(p.container.textContent, /Upload, organize, done\./);
-    assert.match(p.container.textContent, /Manage Your Documents/);
+    // 2026-10-10: the lawyer Vault's design (lawyer/VaultPage.jsx), as the client's own copy.
+    assert.match(p.container.querySelector("h1").textContent, /^Document vault$/);
+    assert.ok(p.container.querySelector("[data-create-folder]"), "Create Folder works for a client too");
     const stats = [...p.container.querySelectorAll("[data-vault-stat]")].map(s => s.dataset.vaultStat);
     assert.deepEqual(stats, ["Total Documents", "Folders Created", "Storage Used"]);
     assert.match(p.container.querySelector('[data-vault-stat="Total Documents"]').textContent, /2/);
     // Storage is not known to the server: it must not be invented.
     assert.match(p.container.querySelector('[data-vault-stat="Storage Used"]').textContent, /—/);
 
-    await click(byLabel(p.container, "Sort documents"));
-    await click(buttons(p.container.querySelector('[role="menu"]'), "Name (A–Z)")[0]);
+    const sorter = p.container.querySelector("select[data-vault-sort]");
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value").set.call(sorter, "name");
+        sorter.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
     const order = [...p.container.querySelectorAll("[data-vault-row]")].map(r => r.dataset.vaultRow);
     assert.deepEqual(order, ["d2", "d1"], "Affidavit draft sorts before Rent notice");
     await p.unmount();

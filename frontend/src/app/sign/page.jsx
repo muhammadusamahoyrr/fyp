@@ -15,6 +15,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { DARK } from '@/components/shared/themes.js';
 import { viewAgreementByInvitation, signAgreementByInvitation } from '@/lib/api.js';
 import SignaturePad from '@/components/shared/SignaturePad.jsx';
+import AgreementBody from '@/components/shared/AgreementBody.jsx';
 
 const t = DARK;
 
@@ -170,11 +171,11 @@ function InvitationSigner() {
           padding: '12px 20px', borderBottom: `1px solid ${t.border}`,
           background: t.surface, fontSize: 12.5, fontWeight: 700, color: t.textMuted,
         }}>The document</div>
-        <div style={{
+        <AgreementBody body={doc.body_html} format={doc.body_format} empty="(No content)" style={{
           padding: '20px 24px', fontSize: 13.5, lineHeight: 1.85, color: t.text,
           fontFamily: "Georgia, 'Times New Roman', serif", maxHeight: 420,
-          overflowY: 'auto', whiteSpace: 'pre-wrap',
-        }}>{doc.body_html || '(No content)'}</div>
+          overflowY: 'auto',
+        }} />
       </Card>
 
       {Array.isArray(doc.parties) && doc.parties.length > 0 && (

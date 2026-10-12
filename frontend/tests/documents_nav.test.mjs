@@ -92,7 +92,7 @@ test("the module tells the sidebar which Documents screen is open", () => {
 
 test("the Documents item toggles its menu and always lands on the home", () => {
     const src = readFileSync(new URL("../src/components/client/Dashboard.jsx", import.meta.url), "utf8");
-    assert.match(src, /aria-expanded=\{hasMenu \? docMenuOpen : undefined\}/, "no expandable state on the item");
+    assert.match(src, /aria-expanded=\{hasMenu \? menuOpen : undefined\}/, "no expandable state on the item");
     assert.match(src, /if \(tab === "documents"\) \{ setDocMenuOpen\(o => !o\); return; \}/,
         "clicking Documents while there must only toggle the menu");
     assert.match(src, /requestDocumentsView\("new"\);\s*setDocSection\("new"\);\s*setDocMenuOpen\(true\);/,

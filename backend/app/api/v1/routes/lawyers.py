@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.core.constants import CaseType, Province
+from app.core.constants import SPECIALIZATION_PATTERN, CaseType, Province
 from app.dependencies import (
     get_current_user,
     require_admin,
@@ -110,6 +110,10 @@ async def read_bookable_slots(
 async def search_lawyers(
     province: Province | None = Query(None),
     case_type: CaseType | None = Query(None),
+    # One practice area a lawyer lists on their profile (2026-10-10: the
+    # client directory's area chips). A closed set, so it is never a free
+    # string matched against the database.
+    specialization: str | None = Query(None, pattern=SPECIALIZATION_PATTERN),
     min_rating: float = Query(0.0, ge=0.0, le=5.0),
     availability: bool | None = Query(None),
     page: int = Query(1, ge=1),
@@ -132,6 +136,7 @@ async def search_lawyers(
     return await lawyer_service.search_lawyers(
         province=province.value if province else None,
         case_type=case_type.value if case_type else None,
+        specialization=specialization,
         min_rating=min_rating,
         availability=availability,
         page=page,

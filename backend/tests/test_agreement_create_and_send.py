@@ -338,3 +338,41 @@ async def test_the_counterparty_cannot_be_replaced_by_a_stranger(world):
 
     with pytest.raises(ForbiddenError):
         await _send(parties=[{"user_id": THIRD}])    # CLIENT omitted
+
+
+# ── the rich (html) body format, 2026-10-11 ─────────────────────────────────
+
+async def _send_rich(body, **kw):
+    from app.services import agreement_service
+    return await agreement_service.create_and_send_agreement(
+        title="Retainer", body_html=body, body_format="html",
+        parties=[{"user_id": CLIENT}], creator_id=LAWYER, method="typed",
+        signature_data=TYPED, consent=True,
+        idempotency_key=kw.get("key") or secrets.token_urlsafe(12),
+        case_id=await _case(), ip_address="203.0.113.9", ip_verifiable=True)
+
+
+async def test_a_canonical_rich_body_is_stored_and_hashed_as_sent(world):
+    from app.services import agreement_service
+    body = agreement_service.preview_body("<p>Fees are <b>40%</b> of recovery.</p>")["body_html"]
+    doc = await _send_rich(body)
+
+    row = await _row(doc["_id"])
+    assert row["body_format"] == "html"
+    assert row["body_html"] == body
+    assert row["body_sha256"] == agreement_service.body_digest(body)
+
+
+async def test_a_rich_body_the_server_would_change_is_refused_and_nothing_is_stored(world):
+    from app.core.exceptions import AppValidationError
+    from app.db.collections import get_agreements_col
+
+    before = await get_agreements_col().count_documents({"created_by": LAWYER})
+    with pytest.raises(AppValidationError):
+        await _send_rich('<p onclick="steal()">Fees</p>')
+    assert await get_agreements_col().count_documents({"created_by": LAWYER}) == before
+
+
+async def test_a_plain_send_still_stores_plain_text(world):
+    doc = await _send()
+    assert (await _row(doc["_id"]))["body_format"] == "plain_text"

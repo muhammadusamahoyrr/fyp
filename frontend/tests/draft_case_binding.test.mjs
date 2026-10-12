@@ -254,3 +254,20 @@ test("a new document uses the case selected when it was opened", async () => {
     assert.equal(api.__calls("saveDocDraft")[0].args[0].case_id, "case-b");
     await page.unmount();
 });
+
+test("the case changes only when the lawyer picks one from the case button", async () => {
+    api.__respond("listDocDrafts", { data: [] });
+    const page = await mountDrafter({ selected: null });
+    const plaint = [...page.container.querySelectorAll("[data-template]")]
+        .find(card => /Plaint — Civil Suit/.test(card.textContent));
+    await page.click([...plaint.querySelectorAll("button")].find(b => /Use template/.test(b.textContent)));
+    assert.equal(page.strip().dataset.caseBinding, "none", "a new document with no case selected starts caseless");
+
+    await page.click(page.strip());                                   // the case button
+    const options = [...page.container.querySelectorAll('[role="option"]')];
+    await page.click(options.find(o => /Matter B/.test(o.textContent)));
+    assert.equal(page.strip().dataset.caseBinding, "bound");
+    await page.click(page.byText(/Save Draft/));
+    assert.equal(api.__calls("saveDocDraft")[0].args[0].case_id, "case-b");
+    await page.unmount();
+});

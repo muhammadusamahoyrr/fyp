@@ -98,6 +98,8 @@ test("CSS injected by the client's Documents screens is scoped by a data attribu
             // Top-level selectors only: drop @keyframes blocks and unwrap @media.
             const body = css.replace(/\$\{[^}]*\}/g, "x")      // template values, e.g. ${DOCS_FONT}
                 .replace(/@keyframes[^{]+\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "")
+                // A container query's opener; its rules inside are still checked.
+                .replace(/@container[^{]+\{/g, "")
                 .replace(/@media[^{]+\{([\s\S]*)\}\s*$/m, "$1");
             for (const sel of body.split("}").map(b => b.split("{")[0].trim()).filter(Boolean)) {
                 for (const part of sel.split(",")) {

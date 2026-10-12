@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
@@ -54,7 +54,7 @@ from reportlab.platypus import (
 
 from app.core.exceptions import AppValidationError
 from app.core.signature_crypto import decrypt_signature
-from app.services.pdf_generator import P, _styles
+from app.services.pdf_generator import P, _styles, esc
 
 #: What the certificate says instead of an IP it cannot stand behind (D8).
 IP_NOT_RECORDED = "not recorded"
@@ -136,6 +136,48 @@ def missing_evidence(agreement: dict) -> list[str]:
     return gaps
 
 
+_ALIGNMENTS = {"left": TA_LEFT, "center": TA_CENTER, "right": TA_RIGHT, "justify": TA_JUSTIFY}
+
+
+def _rich_body(body: str, styles: dict) -> list:
+    """A rich (html-format) body as flowables.
+
+    `agreement_html.pdf_blocks` escapes every piece of text itself and emits
+    only b / i / u / strike / br, so `raw=True` here passes the formatting and
+    nothing a user typed is ever parsed as markup.
+    """
+    from app.services.agreement_html import pdf_blocks
+
+    out = []
+    heads = {
+        "h1": ParagraphStyle("rb_h1", parent=styles["body"], fontSize=15, leading=19,
+                             spaceBefore=6, spaceAfter=8, fontName="Helvetica-Bold"),
+        "h2": ParagraphStyle("rb_h2", parent=styles["body"], fontSize=12.5, leading=16,
+                             spaceBefore=6, spaceAfter=6, fontName="Helvetica-Bold"),
+        "h3": ParagraphStyle("rb_h3", parent=styles["body"], fontSize=11, leading=14,
+                             spaceBefore=4, spaceAfter=4, fontName="Helvetica-Bold"),
+    }
+    for block in pdf_blocks(body):
+        if block["kind"] == "hr":
+            out.append(Spacer(1, 0.1 * cm))
+            out.append(HRFlowable(width="100%", color=colors.HexColor("#bbbbbb")))
+            out.append(Spacer(1, 0.15 * cm))
+            continue
+        base = heads.get(block["kind"], styles["body"])
+        indent = 0.6 * cm * (block.get("depth") or 0) + 0.7 * cm * (block.get("quote") or 0)
+        style = ParagraphStyle(
+            f"rb_{len(out)}", parent=base, leftIndent=indent,
+            alignment=_ALIGNMENTS.get(block.get("align") or "", base.alignment),
+            textColor=colors.HexColor("#444444") if block.get("quote") else base.textColor,
+        )
+        markup = block["markup"]
+        if block.get("bullet"):
+            # The bullet is the renderer's own character, never user text.
+            markup = f"{esc(block['bullet'])}&nbsp;&nbsp;{markup}"
+        out.append(P(markup, style, raw=True))
+    return out
+
+
 def build_executed_pdf(agreement: dict) -> bytes:
     """Render an EXECUTED agreement. Returns PDF bytes.
 
@@ -187,11 +229,14 @@ def build_executed_pdf(agreement: dict) -> bytes:
     story.append(Spacer(1, 0.45 * cm))
 
     body = agreement.get("body_html") or ""
-    for block in body.split("\n"):
-        if block.strip():
-            story.append(P(block, styles["body"]))
-        else:
-            story.append(Spacer(1, 0.25 * cm))
+    if agreement.get("body_format") == "html":
+        story.extend(_rich_body(body, styles))
+    else:
+        for block in body.split("\n"):
+            if block.strip():
+                story.append(P(block, styles["body"]))
+            else:
+                story.append(Spacer(1, 0.25 * cm))
 
     story.append(Spacer(1, 0.8 * cm))
     story.append(HRFlowable(width="100%", color=colors.HexColor("#999999")))

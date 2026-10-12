@@ -432,7 +432,9 @@ test("an unfinished intake resumes past step 1", async () => {
     const { container, unmount } = await mountIntake();
 
     // Step 1 asks for a role. If we resumed correctly we are past it.
-    const onStepOne = !!findButton(container, "Plaintiff");
+    // The role CHOICE, not the word: since 2026-10-10 the steps rail also
+    // says "Plaintiff · Punjab" once step 1 is done.
+    const onStepOne = !!findButton(container, "I'm taking action");
     assert.equal(onStepOne, false,
         "a mid-intake refresh restored the answers but dropped the client back "
         + "to step 1, with no indication of where they had got to");

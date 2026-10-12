@@ -100,8 +100,11 @@ test("3.3 Documents review screen: no inert Request-changes toggle or unsent not
     await settle();
     assert.ok(!buttonTexts(view.container).some(t => /Request changes/.test(t)));
     assert.equal(view.container.querySelector('textarea[placeholder="Add internal notes for this review..."]'), null);
-    // The decision screen's notes, which ARE sent, are still reachable.
-    assert.ok(buttonTexts(view.container).some(t => /Proceed to Decision/.test(t)));
+    // The decision's notes, which ARE sent, are still reachable -- on the
+    // review screen itself since 2026-10-11, where Approve / Return / Reject
+    // sit beside the document instead of on a second screen.
+    assert.ok(buttonTexts(view.container).some(t => /Approve/.test(t)));
+    assert.ok(buttonTexts(view.container).some(t => /Return/.test(t)));
     await view.unmount();
 });
 

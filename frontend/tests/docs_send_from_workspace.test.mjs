@@ -112,7 +112,8 @@ test("Send to lawyer opens the send panel in the workspace, not another screen",
     assert.ok(panel(p.container), "the send panel did not open");
     assert.ok(p.container.querySelector("[data-document-workspace]"), "the workspace was left");
     assert.equal(p.container.querySelector('[data-flow-header="send"]'), null, "the old send screen came back");
-    assert.match(panel(p.container).textContent, /Ready to send\?.*Saved as version 2/s);
+    // Lawyer-first (2026-10-11): the question is who reviews it; the document is a chip.
+    assert.match(panel(p.container).textContent, /Who should review your document\?.*· v2/s);
     assert.match(panel(p.container).textContent, /Sara Ahmed/);
     assert.equal(shown.at(-1), "drafts", "the sidebar should stay on AI drafting");
     await p.unmount();
@@ -159,7 +160,8 @@ test("with no engaged lawyer, the panel says so and points to the marketplace", 
     api.__respond("listEngagements", { data: [] });
     const p = await openSendScreen();
     assert.match(panel(p.container).querySelector("[data-no-engaged-lawyer]").textContent, /no lawyer engaged/);
-    assert.equal(p.container.querySelector("[data-send-submit]").disabled, true);
+    // Nobody to send to, so no Send at all -- only lawyers to hire.
+    assert.equal(p.container.querySelector("[data-send-submit]"), null);
     await p.unmount();
 });
 
@@ -317,5 +319,120 @@ test("a case with no lawyer engaged on it says so, instead of offering lawyers t
     const p = await openSendScreen();
     assert.equal(panel(p.container).querySelectorAll('[aria-label="Reviewing lawyer"] [role="radio"]').length, 0);
     assert.match(panel(p.container).querySelector("[data-no-engaged-lawyer]").textContent, /engaged on this document's case/);
+    await p.unmount();
+});
+
+test("after sending, the Sent screen says to whom and what comes next, and leads back", async () => {
+    const p = await openSendScreen();
+    await click([...panel(p.container).querySelectorAll('[role="radio"]')].find(b => b.textContent.includes("Sara Ahmed")));
+    // The button names the lawyer chosen.
+    assert.match(p.container.querySelector("[data-send-submit]").textContent, /Send to Sara Ahmed/);
+    await click(panel(p.container).querySelector("[data-send-confirm] input"));
+    api.__respond("getDocumentV2", { data: { ...DETAIL, review_status: "submitted", submitted_at: "2026-10-08T09:00:00Z" } });
+    await click(p.container.querySelector("[data-send-submit]"));
+    await settle(40);
+    const sent = p.container.querySelector("[data-send-sent]");
+    assert.ok(sent, "no Sent screen");
+    assert.match(sent.textContent, /Sent to Sara Ahmed/);
+    assert.match(sent.textContent, /Your lawyer reviews it/);
+    await click(sent.querySelector("[data-sent-back]"));
+    assert.equal(p.container.querySelector("[data-send-sent]"), null);
+    assert.ok(p.container.querySelector('[data-review-banner="submitted"]'), "back on the document, with it shown as sent");
+    await p.unmount();
+});
+
+/* QUICK REVIEW (2026-10-11): with nobody hired, the send page lists lawyers
+ * who review one document without being hired -- no consultation, no hire. */
+const REVIEWER = { id: "LX", full_name: "Hina Malik", province: "punjab", specializations: ["family", "civil"],
+    experience_years: 9, rating: 4.6, total_reviews: 12, fee_pkr: 3000, turnaround_hours: 48 };
+const OPEN_REQ = { id: "q1", doc_id: "d1", status: "requested", lawyer_id: "LX", lawyer_name: "Hina Malik",
+    version: 2, note: "Check the amount", fee_pkr: 3000, turnaround_hours: 48,
+    expires_at: new Date(Date.now() + 18 * 3600000).toISOString() };
+
+test("with no lawyer hired, the send page lists lawyers who review documents, with their terms", async () => {
+    api.__respond("listEngagements", { data: [] });
+    api.__respond("listQuickReviewers", { data: { items: [REVIEWER] } });
+    const p = await openSendScreen();
+    await settle(40);
+    assert.match(panel(p.container).textContent, /Get this document reviewed.*No meeting needed/s);
+    const row = p.container.querySelector('[data-reviewer="LX"]');
+    assert.ok(row, "no reviewer listed");
+    assert.match(row.textContent, /Hina Malik.*Family, Civil · Punjab.*9 yrs experience.*4\.6 · 12 reviews/s);
+    assert.match(row.textContent, /Rs 3,000.*48 hrs/s);
+    // Nothing to hire, and no direct send: only a request.
+    assert.equal(p.container.querySelector("[data-send-submit]"), null);
+    assert.equal(/Hire to send/.test(panel(p.container).textContent), false);
+    // The whole-case route is still there, as a link.
+    await click(p.container.querySelector("[data-book-consultation]"));
+    assert.equal(globalThis.__nav.pushed.at(-1), "/lawyers");
+    await p.unmount();
+});
+
+test("a review request needs the owner's confirmation, sends the exact version, then shows it waiting", async () => {
+    api.__respond("listEngagements", { data: [] });
+    api.__respond("listQuickReviewers", { data: { items: [REVIEWER] } });
+    api.__respond("requestQuickReview", { data: OPEN_REQ });
+    const p = await openSendScreen();
+    await settle(40);
+    await click(p.container.querySelector('[data-reviewer="LX"] [data-ask-review]'));
+    const dialog = p.container.querySelector("[data-request-dialog]");
+    assert.ok(dialog, "no confirm dialog");
+    assert.match(dialog.textContent, /Hina Malik.*Version 2.*Rs 3,000.*48 hours/s);
+    const submit = () => p.container.querySelector("[data-request-submit]");
+    assert.equal(submit().disabled, true, "not confirmed yet");
+    await click(dialog.querySelector("[data-request-confirm] input"));
+    assert.equal(submit().disabled, false);
+    await click(submit());
+    const calls = api.__calls("requestQuickReview");
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].args[0], { doc_id: "d1", lawyer_id: "LX", expected_version: 2,
+        expected_pdf_sha256: SHA, note: null });
+    assert.equal(p.container.querySelector("[data-request-dialog]"), null, "the dialog closes once sent");
+    const pending = p.container.querySelector("[data-request-pending]");
+    assert.ok(pending, "the waiting view did not show");
+    assert.match(panel(p.container).textContent, /Review requested/);
+    assert.match(pending.textContent, /Hina Malik accepts/);
+    await p.unmount();
+});
+
+test("a waiting request can be withdrawn, and the list comes back", async () => {
+    api.__respond("listEngagements", { data: [] });
+    api.__respond("listQuickReviewers", { data: { items: [REVIEWER] } });
+    api.__respond("myQuickReviews", { data: { items: [OPEN_REQ] } });
+    api.__respond("cancelQuickReview", { data: { ...OPEN_REQ, status: "cancelled" } });
+    const p = await mount();
+    await act(async () => { requestDocumentsView("drafts"); });
+    await settle();
+    await click(p.container.querySelector('[data-doc="d1"]'));
+    // The header names the waiting request instead of offering another send.
+    assert.equal(btn(p.container, "Send to lawyer"), undefined);
+    await click(btn(p.container, "Review requested"));
+    await settle(40);
+    assert.ok(p.container.querySelector("[data-request-pending]"), "an open request should show as waiting");
+    api.__respond("myQuickReviews", { data: { items: [{ ...OPEN_REQ, status: "cancelled" }] } });
+    await click(p.container.querySelector("[data-request-cancel]"));
+    assert.equal(api.__calls("cancelQuickReview")[0].args[0], "q1");
+    assert.equal(p.container.querySelector("[data-request-pending]"), null);
+    assert.ok(p.container.querySelector('[data-reviewer="LX"]'), "the lawyers should be back");
+    await p.unmount();
+});
+
+test("a declined request is explained above the list", async () => {
+    api.__respond("listEngagements", { data: [] });
+    api.__respond("listQuickReviewers", { data: { items: [REVIEWER] } });
+    api.__respond("myQuickReviews", { data: { items: [{ ...OPEN_REQ, status: "declined" }] } });
+    const p = await openSendScreen();
+    await settle(40);
+    assert.match(p.container.querySelector("[data-request-closed]").textContent, /Hina Malik could not take your last request.*Nothing was shared or charged/s);
+    await p.unmount();
+});
+
+test("with a lawyer engaged, quick reviews are offered below them, never the engaged lawyer again", async () => {
+    api.__respond("listQuickReviewers", { data: { items: [REVIEWER, { ...REVIEWER, id: "L1", full_name: "Sara Ahmed" }] } });
+    const p = await openSendScreen();
+    await settle(40);
+    assert.match(panel(p.container).textContent, /OR GET A QUICK REVIEW FROM ANOTHER LAWYER/);
+    assert.ok(p.container.querySelector('[data-reviewer="LX"]'));
+    assert.equal(p.container.querySelector('[data-reviewer="L1"]'), null);
     await p.unmount();
 });

@@ -456,6 +456,73 @@ export async function getCase(caseId) {
   return apiFetch(`/cases/${caseId}`);
 }
 
+// ─── A lawyer's private files on a case (2026-10-11) ─────────────────────────
+// Only the lawyer who uploaded a file sees it; the client is not shown it.
+export async function listCaseFiles(caseId) {
+  return apiFetch(`/case-files/${encodeURIComponent(caseId)}`);
+}
+
+export async function uploadCaseFile(caseId, file) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  return apiFetchMultipart(`/case-files/${encodeURIComponent(caseId)}`, fd);
+}
+
+/** The file as a blob URL the caller opens and later revokes. */
+export async function openCaseFile(caseId, fileId) {
+  const { data: res, error } = await apiFetch(
+    `/case-files/${encodeURIComponent(caseId)}/${encodeURIComponent(fileId)}/download`,
+    { returnResponse: true },
+  );
+  if (!res) return { data: null, error: error?.message || 'Could not open this file.' };
+  const blob = await res.blob();
+  return { data: URL.createObjectURL(blob), error: null };
+}
+
+export async function deleteCaseFile(caseId, fileId) {
+  return apiFetch(`/case-files/${encodeURIComponent(caseId)}/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+}
+
+// ── Quick document review: one document, by a lawyer the client has not hired ──
+
+export async function listQuickReviewers(q) {
+  const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+  return apiFetch(`/quick-review/lawyers${qs}`);
+}
+
+export async function requestQuickReview(body) {
+  return apiFetch('/quick-review/requests', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function myQuickReviews(docId) {
+  const qs = docId ? `?doc_id=${encodeURIComponent(docId)}` : '';
+  return apiFetch(`/quick-review/requests/mine${qs}`);
+}
+
+export async function cancelQuickReview(requestId) {
+  return apiFetch(`/quick-review/requests/${encodeURIComponent(requestId)}/cancel`, { method: 'POST' });
+}
+
+export async function quickReviewInbox() {
+  return apiFetch('/quick-review/inbox');
+}
+
+export async function acceptQuickReview(requestId) {
+  return apiFetch(`/quick-review/requests/${encodeURIComponent(requestId)}/accept`, { method: 'POST' });
+}
+
+export async function declineQuickReview(requestId) {
+  return apiFetch(`/quick-review/requests/${encodeURIComponent(requestId)}/decline`, { method: 'POST' });
+}
+
+export async function getReviewOffer() {
+  return apiFetch('/quick-review/offer');
+}
+
+export async function setReviewOffer(body) {
+  return apiFetch('/quick-review/offer', { method: 'PUT', body: JSON.stringify(body) });
+}
+
 /** A lawyer opens a case for a client who is not on the platform (walk-in). */
 export async function createWalkInCase(body) {
   return apiFetch('/cases/walk-in', { method: 'POST', body: JSON.stringify(body) });
@@ -579,10 +646,12 @@ export async function closeAccount(password) {
 }
 
 // ─── Lawyers ─────────────────────────────────────────────────────────────────
-export async function searchLawyers({ province, case_type, min_rating, availability, page = 1, page_size = 10 } = {}) {
+export async function searchLawyers({ province, case_type, specialization, min_rating, availability, page = 1, page_size = 10 } = {}) {
   const p = new URLSearchParams();
   if (province) p.set('province', province);
   if (case_type) p.set('case_type', case_type);
+  // One practice area a lawyer lists (property, corporate, tax…).
+  if (specialization) p.set('specialization', specialization);
   if (min_rating !== undefined) p.set('min_rating', min_rating);
   if (availability !== undefined && availability !== null) p.set('availability', availability);
   p.set('page', page);
@@ -1226,14 +1295,25 @@ export async function markAllNotificationsRead() {
  *   { user_id: "..." }                      a party who signs from their account
  *   { email: "x@y.pk", full_name: "..." }   invited; signs via a one-time link
  */
-export async function createAgreement({ title, body_html, party_ids, case_id,
+export async function createAgreement({ title, body_html, body_format, party_ids, case_id,
                                         method, signature_data, consent,
                                         idempotency_key }) {
   return apiFetch('/agreements', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotency_key || idempotencyKey() },
-    body: JSON.stringify({ title, body_html, party_ids, case_id,
-                           method, signature_data, consent }),
+    // `body_format` only when given: absent means plain text, as before.
+    body: JSON.stringify({ title, body_html, ...(body_format ? { body_format } : {}),
+                           party_ids, case_id, method, signature_data, consent }),
+  });
+}
+
+/* The canonical form of a rich agreement body. The builder shows THIS at Review
+ * and sends it, because the server refuses a rich body it would have to change:
+ * the text that is hashed and signed is the text the creator reviewed. */
+export async function previewAgreementBody(body_html) {
+  return apiFetch('/agreements/body-preview', {
+    method: 'POST',
+    body: JSON.stringify({ body_html }),
   });
 }
 
@@ -2469,6 +2549,29 @@ export async function reviewDocumentV2(
       expected_version: expectedVersion,
       expected_pdf_sha256: expectedPdfSha256,
       note,
+    }),
+  });
+}
+
+/** The submitted revision's wording, for the reviewing lawyer to edit. */
+export async function getReviewTextV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/review/text`);
+}
+
+/** Save the reviewing lawyer's wording as a new revision and RETURN the
+ *  document to the client with it. Never an approval: the client sends it
+ *  back if they accept the edits. */
+export async function returnWithEditsV2(
+  docId, { bodyHtml, note = null, expectedVersion, expectedPdfSha256 }, key,
+) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/review/return-with-edits`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      body_html: bodyHtml,
+      note,
+      expected_version: expectedVersion,
+      expected_pdf_sha256: expectedPdfSha256,
     }),
   });
 }

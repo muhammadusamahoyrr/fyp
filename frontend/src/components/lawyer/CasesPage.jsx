@@ -23,7 +23,8 @@ import {
     listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask,
     toggleTask as apiToggleTask, listEngagements, proposeEngagementTerms, declineEngagement,
     completeEngagement, terminateEngagement, listDocuments, rescheduleHearing as apiReschedule,
-    myDocumentsV2, fetchRevisionPreview, fetchDocumentPreviewUrl,
+    myDocumentsV2, fetchRevisionPreview, fetchDocumentPreviewUrl, reviewQueueV2,
+    listCaseFiles, uploadCaseFile, openCaseFile, deleteCaseFile,
 } from "@/lib/api.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { avatarBg } from "./utils.js";
@@ -844,14 +845,14 @@ export const CASES_HOME_CSS = `[data-cases-home]{color:var(--ink);font:15px/1.5 
 [data-cases-home] .ch-hear b{display:block;font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-cases-home] .ch-hear span{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-cases-home] .ch-more{font-size:11.5px;color:var(--muted);padding-left:4px}
-[data-cases-home] .ch-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px}
-[data-cases-home] .ch-tabs{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
-[data-cases-home] .ch-tab{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 13px;border-radius:9px;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+[data-cases-home] .ch-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+[data-cases-home] .ch-tabs{display:flex;gap:2px;padding:4px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
+[data-cases-home] .ch-tab{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border-radius:10px;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
 [data-cases-home] .ch-tab:hover{color:var(--hover-ink)}
 [data-cases-home] .ch-tab[aria-selected="true"]{background:var(--brand-solid);color:var(--on-brand)}
-[data-cases-home] .ch-n{min-width:22px;text-align:center;font:600 11px/18px "JetBrains Mono",monospace;padding:0 6px;border-radius:999px;background:var(--chip-n)}
-[data-cases-home] .ch-n.hot{background:var(--gold);color:#241a05}
-[data-cases-home] .ch-tab[aria-selected="true"] .ch-n{background:rgba(0,0,0,.18);color:inherit}
+[data-cases-home] .ch-n{font-size:14px;font-weight:600;opacity:.85}
+[data-cases-home] .ch-n.hot{color:var(--gold);opacity:1;font-weight:700}
+[data-cases-home] .ch-tab[aria-selected="true"] .ch-n{color:inherit;opacity:1}
 [data-cases-home] .ch-hist{margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:0 14px;border-radius:12px;border:1px dashed var(--line-strong);background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
 [data-cases-home] .ch-hist:hover,[data-cases-home] .ch-hist[aria-selected="true"]{border-color:var(--hover-line);color:var(--hover-ink);background:var(--hover-tint)}
 [data-cases-home] .ch-list{overflow:hidden}
@@ -1234,14 +1235,21 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {},
                 </section>
 
                 {/* The bar: what to show, then Sort and Filter. */}
-                <div className="ch-card ch-bar">
+                {/* One line, no card (2026-10-11): the views -- Closed is one of them,
+                    not a separate History box -- and then Sort and Filter on the right. */}
+                <div className="ch-bar">
                     <div role="tablist" aria-label="Filter cases" className="ch-tabs">
                         {chips.map(ch => (
                             <button key={ch.id} type="button" role="tab" aria-selected={filter === ch.id} className="ch-tab" onClick={() => setFilter(ch.id)}>
                                 {ch.label}<span className={`ch-n${ch.hot && ch.n && filter !== ch.id ? " hot" : ""}`}>{ch.n}</span>
                             </button>
                         ))}
+                        <button type="button" role="tab" aria-selected={filter === "history"} className="ch-tab" onClick={() => setFilter("history")}
+                            title="Closed and dismissed cases">
+                            Closed<span className="ch-n">{history.length}</span>
+                        </button>
                     </div>
+                    <span style={{ flex: 1 }} />
                     <BarMenu label="Sort" icon={SORT_ICON} width={210}>
                         {(close) => SORTS.map(([id, text]) => (
                             <button key={id} type="button" role="menuitemradio" aria-checked={sortBy === id}
@@ -1265,9 +1273,6 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {},
                                 onApply={(d) => { setTypes(d.types); setProvinces(d.provinces); close(); }} />
                         )}
                     </BarMenu>
-                    <button type="button" role="tab" aria-selected={filter === "history"} className="ch-hist" style={{ height: 44 }} onClick={() => setFilter("history")}>
-                        <Icon d={I.clock} size={15} />History · Closed {history.length}
-                    </button>
                 </div>
 
                 {(sections_.length > 0 || (needs && counts.needs === 0) || (filter === "all" && counts.all === 0)) && (
@@ -1332,14 +1337,16 @@ function CaseWorkspace({ caseId, cases, setCases, requests = [], onRequestsChang
         Promise.all([
             Promise.resolve(listDocuments(realId)).catch(() => ({ error: true })),
             Promise.resolve(myDocumentsV2({ caseId: realId, limit: 50 })).catch(() => null),
-        ]).then(([legacy, v2]) => {
+            clientDocsForCase(realId).catch(() => null),
+        ]).then(([legacy, v2, received]) => {
             if (off) return;
             const v2Rows = Array.isArray(v2?.data?.items) ? v2.data.items.map(d => ({ ...d, _v2: true })) : [];
             const legacyRows = legacy && !legacy.error && Array.isArray(legacy.data) ? legacy.data : null;
-            if (!legacyRows && !v2Rows.length) { setDocsFailed(true); setDocs([]); return; }
+            const fromClient = received || [];
+            if (!legacyRows && !v2Rows.length && !fromClient.length) { setDocsFailed(true); setDocs([]); return; }
             setDocsFailed(false);
-            const seen = new Set(v2Rows.map(d => d.id));
-            setDocs([...v2Rows, ...(legacyRows || []).filter(d => !seen.has(d._id || d.id))]);
+            const seen = new Set([...v2Rows, ...fromClient].map(d => d.id));
+            setDocs([...fromClient, ...v2Rows, ...(legacyRows || []).filter(d => !seen.has(d._id || d.id))]);
         });
         return () => { off = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1663,6 +1670,9 @@ function CaseWorkspace({ caseId, cases, setCases, requests = [], onRequestsChang
             )}
             {tab === "documents" && (
                 <CaseDocuments docs={docs} failed={docsFailed} caseNo={c.id} setPage={setPage} setActiveCase={setActiveCase} />
+            )}
+            {tab === "documents" && (
+                <CaseFiles caseId={realId} readOnly={closed} />
             )}
 
             {/* Schedule hearing */}
@@ -2305,10 +2315,144 @@ function CaseTasks({ caseId, tasks, setTasks, loading, nextHearing, showToast, f
 
 // ── Documents ─────────────────────────────────────────────────
 /** A document row's status, in a word. */
+/* WHAT THE CLIENT SENT ON THIS CASE (2026-10-11). The case's Documents tab
+ * listed only what the lawyer owns, so a plaint the client sent on this very
+ * case was missing from it ("No documents yet") and reachable only from the
+ * review inbox. The inbox already returns, per row, the case and the exact
+ * revision this lawyer may open -- the one sent to them, or the one they
+ * decided on -- so the case's rows are taken from it. Nothing new is exposed:
+ * the server scopes every row to this lawyer. A few pages at most. */
+async function clientDocsForCase(caseId) {
+    const rows = [];
+    let cursor = null;
+    for (let page = 0; page < 5; page++) {
+        const { data, error } = await reviewQueueV2({ status: "all", cursor, limit: 100 });
+        if (error || !data) return page ? rows : null;
+        for (const r of data.items || []) {
+            if (r.case_id !== caseId) continue;
+            // The revision this lawyer may open, as the review inbox reads it:
+            // the one sent to them, else the one they decided on.
+            rows.push({ ...r, _fromClient: true,
+                viewRevisionId: r.submitted_revision_id ?? r.reviewed_revision_id ?? null,
+                viewPdfSha256: r.submitted_pdf_sha256 ?? r.reviewed_pdf_sha256 ?? null });
+        }
+        cursor = data.next_cursor;
+        if (!cursor) break;
+    }
+    return rows;
+}
+
+const _CLIENT_DOC_STATUS = {
+    submitted: "Waiting for you", approved: "Approved", returned: "Returned", rejected: "Rejected",
+};
+
 function docStatus(d) {
+    if (d._fromClient) return _CLIENT_DOC_STATUS[d.review_status] || "Sent to you";
     if (d._v2) return documentStatusView(d).label;
     const s = d.review_status || d.status || "";
     return s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ") : "Draft";
+}
+
+/* THE LAWYER'S OWN FILES ON THE CASE (2026-10-11): a summons, an order, a CNIC
+ * copy. Private to the lawyer who uploaded them -- the client is not shown
+ * these. PDF, PNG or JPEG up to 10 MB; the server decides the kind from the
+ * bytes and says why when it refuses one. */
+const _MAX_FILE = 10 * 1024 * 1024;
+function _size(n) {
+    return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+function CaseFiles({ caseId, readOnly }) {
+    const [files, setFiles] = useState(null);
+    const [failed, setFailed] = useState(false);
+    const [busy, setBusy] = useState(null);       // "upload" | file id
+    const [issue, setIssue] = useState("");
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+        let off = false;
+        listCaseFiles(caseId).then(({ data, error }) => {
+            if (off) return;
+            if (error || !data) { setFailed(true); setFiles([]); return; }
+            setFailed(false); setFiles(data.items || []);
+        });
+        return () => { off = true; };
+    }, [caseId]);
+
+    const pick = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        setIssue("");
+        if (file.size > _MAX_FILE) { setIssue("That file is larger than 10 MB."); return; }
+        setBusy("upload");
+        const { data, error } = await uploadCaseFile(caseId, file);
+        setBusy(null);
+        if (error || !data) { setIssue(error?.message || "The file could not be uploaded."); return; }
+        setFiles(prev => [data, ...(prev || [])]);
+    };
+    const open = async (f) => {
+        setIssue(""); setBusy(f.id);
+        const { data: url, error } = await openCaseFile(caseId, f.id);
+        setBusy(null);
+        if (!url) { setIssue(error || "Could not open this file."); return; }
+        const win = window.open(url, "_blank");
+        if (win) win.opener = null; else setIssue("Your browser blocked the new tab.");
+        setTimeout(() => URL.revokeObjectURL?.(url), 60000);
+    };
+    const remove = async (f) => {
+        if (typeof window !== "undefined" && !window.confirm(`Delete "${f.name}" from this case?`)) return;
+        setIssue(""); setBusy(f.id);
+        const { error } = await deleteCaseFile(caseId, f.id);
+        setBusy(null);
+        if (error) { setIssue(error.message || "The file could not be deleted."); return; }
+        setFiles(prev => (prev || []).filter(x => x.id !== f.id));
+    };
+
+    return (
+        <div className="cw-col" data-case-files style={{ marginTop: 18 }}>
+            <div className="cw-card-head" style={{ alignItems: "center" }}>
+                <div>
+                    <b style={{ display: "block", fontSize: 15, color: "var(--ink)" }}>Your files</b>
+                    <span className="cw-muted" style={{ fontSize: 13 }}>Summons, orders, copies. Only you can see these; the client is not shown them.</span>
+                </div>
+                {!readOnly && <>
+                    <input ref={inputRef} type="file" accept="application/pdf,image/png,image/jpeg" onChange={pick}
+                        aria-label="Choose a file to upload" style={{ display: "none" }} />
+                    <button type="button" className="cw-btn" onClick={() => inputRef.current?.click()} disabled={busy === "upload"}>
+                        <Icon d="M12 15V3M7 8l5-5 5 5M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" size={15} />
+                        {busy === "upload" ? "Uploading…" : "Upload file"}
+                    </button>
+                </>}
+            </div>
+            {issue && <div role="alert" style={{ fontSize: 13, color: "var(--danger)" }}>{issue}</div>}
+            {files === null && <div className="cw-muted">Loading files…</div>}
+            {failed && <div role="alert" style={{ fontSize: 13, color: "var(--danger)" }}>Could not load your files for this case.</div>}
+            {files && !failed && files.length === 0 && (
+                <div className="cw-card cw-empty" style={{ borderStyle: "dashed" }}>
+                    {readOnly ? "No files were kept on this case." : "No files yet. Upload a PDF, PNG or JPEG of up to 10 MB."}
+                </div>
+            )}
+            {files && files.length > 0 && (
+                <div className="cw-card cw-flush">
+                    {files.map(f => (
+                        <div key={f.id} className="cw-doc" data-case-file={f.id}>
+                            <span className="cw-paper" aria-hidden="true"><i /><i /><i /><i /></span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div className="cw-tl-title">{f.name}</div>
+                                <div className="cw-tl-sub">{f.content_type === "application/pdf" ? "PDF" : "Image"} · {_size(f.size)}{f.created_at ? ` · added ${dayMonth(f.created_at)}` : ""}</div>
+                            </div>
+                            <span className="cw-tag"><i />Only you</span>
+                            <button type="button" className="cw-btn" disabled={busy === f.id} onClick={() => open(f)}>{busy === f.id ? "Opening…" : "Open"}</button>
+                            {!readOnly && <button type="button" className="cw-btn" aria-label={`Delete ${f.name}`} title="Delete" disabled={busy === f.id} onClick={() => remove(f)}>
+                                <Icon d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" size={15} />
+                            </button>}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function CaseDocuments({ docs, failed, caseNo, setPage, setActiveCase }) {
@@ -2320,7 +2464,12 @@ function CaseDocuments({ docs, failed, caseNo, setPage, setActiveCase }) {
         setBusy(id);
         setIssue(p => ({ ...p, [id]: null }));
         let url = null, err = null;
-        if (d._v2) {
+        if (d._fromClient) {
+            // The revision this lawyer may see -- never "the latest".
+            const res = await fetchRevisionPreview(id, { revisionId: d.viewRevisionId, expectedPdfSha256: d.viewPdfSha256 });
+            url = res.data?.url || null;
+            err = res.error?.message || null;
+        } else if (d._v2) {
             const res = await fetchRevisionPreview(id, { revisionId: d.revision_id, expectedPdfSha256: d.pdf_sha256 });
             url = res.data?.url || null;
             err = res.error?.message || null;
@@ -2342,7 +2491,7 @@ function CaseDocuments({ docs, failed, caseNo, setPage, setActiveCase }) {
     return (
         <div className="cw-col">
             <div className="cw-card-head" style={{ alignItems: "center" }}>
-                <p className="cw-muted" style={{ margin: 0, fontSize: 14 }}>Documents drafted for this case.</p>
+                <p className="cw-muted" style={{ margin: 0, fontSize: 14 }}>Documents on this case: sent by the client, or drafted by you.</p>
                 {setPage && <button type="button" className="cw-cta" onClick={draft}><Icon d={I.fileText} size={15} />Draft a document</button>}
             </div>
             {docs === null && <div className="cw-muted">Loading documents…</div>}
@@ -2350,7 +2499,7 @@ function CaseDocuments({ docs, failed, caseNo, setPage, setActiveCase }) {
             {docs && !failed && docs.length === 0 && (
                 <div className="cw-card cw-empty" style={{ borderStyle: "dashed" }}>
                     <b style={{ display: "block", fontSize: 17, color: "var(--ink)" }}>No documents yet</b>
-                    Draft a plaint, notice or application for this case in Legal drafting.
+                    The client has sent nothing on this case yet. Draft a plaint, notice or application for it in Legal drafting.
                 </div>
             )}
             {docs && docs.length > 0 && (
@@ -2358,19 +2507,21 @@ function CaseDocuments({ docs, failed, caseNo, setPage, setActiveCase }) {
                     {docs.map((d, i) => {
                         const id = d.id || d._id || i;
                         const when = d.updated_at || d.created_at;
-                        const canOpen = d._v2 ? d.downloadable !== false : true;
+                        const canOpen = d._fromClient ? !!(d.viewRevisionId && d.viewPdfSha256)
+                            : d._v2 ? d.downloadable !== false : true;
                         return (
                             <div key={id} className="cw-doc" data-case-doc={id}>
                                 <span className="cw-paper" aria-hidden="true"><i /><i /><i /><i /></span>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div className="cw-tl-title">{d.title || "Document"}</div>
                                     <div className="cw-tl-sub">
-                                        {d._v2 ? `v${d.version || 1}` : (d.template_type || "").replace(/_/g, " ")}
+                                        {d._fromClient ? `Sent by ${d.client_name || "the client"}${d.submitted_version ? ` · v${d.submitted_version}` : ""}`
+                                            : d._v2 ? `v${d.version || 1}` : (d.template_type || "").replace(/_/g, " ")}
                                         {when ? ` · updated ${dayMonth(when)}` : ""}
                                     </div>
                                     {issue[id] && <div role="alert" style={{ fontSize: 12, color: "var(--danger)", marginTop: 4 }}>{issue[id]}</div>}
                                 </div>
-                                <span className="cw-tag brand"><i />{docStatus(d)}</span>
+                                <span className={`cw-tag ${d._fromClient && d.review_status !== "approved" ? "gold" : "brand"}`}><i />{docStatus(d)}</span>
                                 <button type="button" className="cw-btn" disabled={!canOpen || busy === id} onClick={() => open(d)}>{busy === id ? "Opening…" : "Open"}</button>
                             </div>
                         );

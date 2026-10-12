@@ -23,12 +23,9 @@ test("the client asks the requirements route for that instrument", () => {
     assert.match(api, /\/documents\/requirements\/\$\{encodeURIComponent\(templateType\)\}/);
 });
 
-test("the editor shows the checklist and never claims it was checked", () => {
-    assert.match(page, /<RequirementsChecklist t=\{t\} report=\{requirements\} \/>/);
-    assert.match(page, /not checked automatically/);
-    // A reopened draft carries only the name, so the type is found by name too.
-    assert.match(page, /TEMPLATES\.find\(x => x\.name === tmpl\?\.name\)/);
-    assert.ok(!/satisfied/i.test(page.slice(page.indexOf("function RequirementsChecklist"),
-                                           page.indexOf("function StageEditor"))),
-        "the checklist must not speak of requirements as satisfied");
+test("the drafter no longer shows the checklist (removed 2026-10-11 as noise)", () => {
+    // It certified nothing and the lawyer asked for it to go. If it returns, it
+    // must again say that nothing was checked automatically.
+    assert.doesNotMatch(page, /RequirementsChecklist/);
+    assert.doesNotMatch(page, /pleadingRequirements\(/);
 });

@@ -24,13 +24,12 @@ import {
     caseActionsBlocked, boundCaseId,
 } from "@/lib/draftCaseBinding.js";
 import { verificationView } from "@/lib/draftVerification.js";
-import { pleadingRequirements } from "@/lib/api.js";
 
 // ============================================================
 // EDITOR LOOK (2026-10-09) — the approved drafting-editor design, on the
 // Legal Drafting palette (draftingTheme.js). Scoped by [data-drafter-editor].
 // ============================================================
-export const EDITOR_CSS = `[data-drafter-editor]{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;--top-h:72px;--tools-h:72px;background:var(--bg);color:var(--ink);font:15px/1.5 "Hanken Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased;--stage:rgba(0,0,0,.16)}
+export const EDITOR_CSS = `[data-drafter-editor]{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;--top-h:72px;--tools-h:72px;background:var(--bg);color:var(--ink);font:15px/1.5 "Hanken Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased;--stage:rgba(0,0,0,.16)}
 [data-drafter-editor][data-mode="light"]{--stage:#E6E4EA}
 [data-drafter-editor] *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
 [data-drafter-editor] ::-webkit-scrollbar{width:8px;height:6px}
@@ -54,59 +53,104 @@ export const EDITOR_CSS = `[data-drafter-editor]{flex:1;min-height:0;overflow-y:
 [data-drafter-editor] .de-note{font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:999px;white-space:nowrap}
 [data-drafter-editor] .de-note.ok{background:var(--brand-soft);color:var(--brand-text)}
 [data-drafter-editor] .de-note.bad{background:var(--danger-soft);color:var(--danger)}
+[data-drafter-editor] .de-drop{position:relative;flex:none}
+[data-drafter-editor] .de-case{display:flex;align-items:center;gap:8px;height:38px;max-width:260px;padding:0 11px 0 4px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;cursor:pointer;text-align:left;transition:border-color .15s,background .15s}
+[data-drafter-editor] .de-case:hover,[data-drafter-editor] .de-case[aria-expanded="true"]{border-color:var(--hover-line);background:var(--hover-tint)}
+[data-drafter-editor] .de-case .ic{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--brand-soft);color:var(--brand-text)}
+[data-drafter-editor] .de-case[data-case-binding="unavailable"]{border-color:color-mix(in srgb,var(--danger) 55%,transparent)}
+[data-drafter-editor] .de-case[data-case-binding="unavailable"] .ic{background:var(--danger-soft);color:var(--danger)}
+[data-drafter-editor] .de-case b{display:block;font-size:12.5px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-drafter-editor] .de-case small{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-drafter-editor] .de-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:60;width:min(380px,90vw);max-height:60vh;overflow-y:auto;padding:8px;border-radius:16px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 24px 48px -18px rgba(0,0,0,.8);scrollbar-width:thin}
+[data-drafter-editor] .de-pop[hidden]{display:none}
+[data-drafter-editor] .de-pop h3{margin:4px 8px 8px;font:600 15px/1.2 Literata,Georgia,serif}
+[data-drafter-editor] .de-opt{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;padding:8px 10px;border:0;border-radius:10px;background:transparent;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+[data-drafter-editor] .de-opt small{font-size:11.5px;color:var(--muted)}
+[data-drafter-editor] .de-opt:hover{background:var(--hover-tint)}
+[data-drafter-editor] .de-opt[aria-selected="true"]{background:var(--brand-soft);color:var(--brand-text);font-weight:650}
+[data-drafter-editor] .de-save{display:flex}
+/* A pill, like the case button beside it. */
+[data-drafter-editor] .de-save .de-btn{height:38px;font-size:13px}
+[data-drafter-editor] .de-save .de-save-main{border-radius:999px 0 0 999px;padding:0 14px 0 16px}
+[data-drafter-editor] .de-save .de-save-more{width:36px;padding:0;justify-content:center;border-radius:0 999px 999px 0;border-left:1px solid rgba(4,33,42,.22);width:36px;padding-right:3px}
+[data-drafter-editor] .de-save .de-save-more[aria-expanded="true"] svg{transform:rotate(180deg)}
+[data-drafter-editor] .de-save-menu{width:min(330px,90vw)}
+[data-drafter-editor] .de-opt:disabled{opacity:.5;cursor:not-allowed}
+[data-drafter-editor] .de-sep-h{height:1px;margin:6px 4px;background:var(--line)}
 [data-drafter-editor] .de-acct{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px 0 6px;border-radius:999px;border:1px solid var(--line);background:var(--surface);max-width:250px}
 [data-drafter-editor] .de-acct b{display:block;font-size:13px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-drafter-editor] .de-acct small{font-size:11.5px;color:var(--muted)}
 [data-drafter-editor] .de-avatar{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:#5B7BE0;color:#fff}
-[data-drafter-editor] .de-stage{flex:none;margin:0 18px 18px;border-radius:24px;background:var(--stage);display:flex;flex-direction:column;padding:0 18px 18px}
-[data-drafter-editor] .de-tools{position:sticky;top:var(--top-h);z-index:7;padding-top:18px;margin:0 -18px;padding-inline:18px;border-radius:24px 24px 0 0;background:linear-gradient(var(--stage),var(--stage)) top/100% 18px no-repeat,linear-gradient(var(--bg),var(--bg)) top/100% 18px no-repeat}
-[data-drafter-editor] .de-toolbar{display:flex;align-items:center;gap:2px;padding:8px;border-radius:16px;border:1px solid var(--line);background:var(--surface);overflow-x:auto;scrollbar-width:thin;box-shadow:var(--shadow-rest)}
-[data-drafter-editor] .de-tb{height:36px;min-width:34px;padding:0 6px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;font-weight:700;font-size:15px;flex:none}
+/* Edge to edge (2026-10-11): no strip of page colour between the sidebar and the stage. */
+[data-drafter-editor] .de-stage{flex:1;min-height:0;margin:0;border-radius:24px 24px 0 0;background:var(--stage);display:flex;flex-direction:column;padding:0 18px 6px}
+[data-drafter-editor] .de-tools{position:sticky;top:var(--top-h);z-index:7;padding-top:8px;margin:0 -18px;padding-inline:18px;border-radius:24px 24px 0 0;background:linear-gradient(var(--stage),var(--stage)) top/100% 8px no-repeat,linear-gradient(var(--bg),var(--bg)) top/100% 8px no-repeat}
+[data-drafter-editor] .de-toolbar{display:flex;align-items:center;gap:2px;padding:6px 8px;border-radius:16px;border:1px solid var(--line);background:var(--surface);overflow-x:auto;scrollbar-width:none;box-shadow:var(--shadow-rest)}
+/* Scrolls sideways when narrow, with no visible scrollbar. */
+[data-drafter-editor] .de-toolbar::-webkit-scrollbar{display:none}
+[data-drafter-editor] .de-tb{height:34px;min-width:34px;padding:0 6px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;font-weight:700;font-size:15px;flex:none}
 [data-drafter-editor] .de-tb:hover{background:var(--hover-tint);color:var(--hover-ink)}
 [data-drafter-editor] .de-tb[aria-pressed="true"]{background:var(--teal);color:var(--on-teal)}
-[data-drafter-editor] .de-sep{width:1px;height:24px;background:var(--line-strong);margin:0 4px;flex:none}
-[data-drafter-editor] .de-select{height:40px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--input);font-size:14px;flex:none;cursor:pointer}
+[data-drafter-editor] .de-sep{width:1px;height:22px;background:var(--line-strong);margin:0 4px;flex:none}
+[data-drafter-editor] .de-select{height:34px;padding:0 8px;border-radius:9px;border:1px solid var(--line);background:var(--input);font-size:13px;flex:none;cursor:pointer}
 [data-drafter-editor] .de-select:hover{border-color:var(--hover-line)}
-[data-drafter-editor] .de-split{display:flex;gap:16px;margin-top:16px;align-items:flex-start}
-[data-drafter-editor] .de-doc{flex:1;min-width:0;display:flex;flex-direction:column;border-radius:18px;border:1px solid var(--line);background:var(--surface)}
+/* Two columns of one height that fill the screen (2026-10-11): the page scrolls
+   inside its own column, so its top and bottom always line up with the assistant's. */
+[data-drafter-editor] .de-split{display:flex;gap:16px;margin-top:16px;align-items:stretch;flex:1;min-height:0}
+/* The page sits straight on the stage's grey (2026-10-11): no card around it. */
+[data-drafter-editor] .de-doc{flex:1;min-width:0;display:flex;flex-direction:column}
 [data-drafter-editor] .de-strips{flex:none;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
 [data-drafter-editor] .de-strips > div{padding:7px 20px}
 [data-drafter-editor] .de-strips > div + div{border-top:1px solid var(--line)}
-[data-drafter-editor] .de-scroll{padding:28px 24px 24px}
+[data-drafter-editor] .de-doc{min-height:0}
+[data-drafter-editor] .de-scroll{flex:1;min-height:0;overflow-y:auto;padding:0 6px 0 0;border-radius:6px}
+[data-drafter-editor] .de-scroll::-webkit-scrollbar{width:6px}
+[data-drafter-editor] .de-scroll::-webkit-scrollbar-thumb{border-radius:6px;background:color-mix(in srgb,var(--ink) 22%,transparent)}
+[data-drafter-editor] .de-scroll::-webkit-scrollbar-track{background:transparent}
 [data-drafter-editor] .de-paper{max-width:820px;margin:0 auto;min-height:640px;background:var(--paper);color:var(--paper-ink);border-radius:6px;padding:64px 76px;line-height:1.95;font-size:15px;outline:none;white-space:pre-wrap;box-shadow:0 18px 40px -22px rgba(0,0,0,.65)}
-[data-drafter-editor] .de-page{text-align:center;margin-top:10px;font-size:11px;color:var(--faint)}
-[data-drafter-editor] .de-assist{width:400px;flex:none;display:flex;flex-direction:column;border-radius:18px;border:1px solid var(--line);background:var(--surface);overflow:hidden;position:sticky;top:calc(var(--top-h) + var(--tools-h) + 16px);height:calc(100vh - var(--top-h) - var(--tools-h) - 40px);min-height:420px}
-[data-drafter-editor] .de-assist-head{padding:18px 24px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+[data-drafter-editor] .de-assist{width:400px;flex:none;display:flex;flex-direction:column;border-radius:18px;border:1px solid var(--line);background:var(--surface);overflow:hidden}
+[data-drafter-editor] .de-assist-head{padding:14px 22px;background:var(--surface-2);border-bottom:1px solid var(--line)}
 [data-drafter-editor] .de-assist-head b{display:block;font-size:17px}
 [data-drafter-editor] .de-assist-head span{font-size:13.5px;color:var(--muted)}
-[data-drafter-editor] .de-assist-body{flex:1;min-height:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px;scrollbar-width:thin}
-[data-drafter-editor] .de-hello{border:1px solid var(--line);border-radius:18px;background:var(--surface-2);padding:20px}
+[data-drafter-editor] .de-assist-body{flex:1;min-height:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+/* Just the greeting now (2026-10-11): no second title or icon card around it. */
+[data-drafter-editor] .de-hello{padding:0}
 [data-drafter-editor] .de-hello-top{display:flex;gap:14px;align-items:center}
 [data-drafter-editor] .de-hello-ic{width:58px;height:58px;flex:none;border-radius:14px;background:var(--brand-solid);color:var(--on-brand);display:grid;place-items:center}
 [data-drafter-editor] .de-hello-top b{display:block;font-size:19px;line-height:1.2}
 [data-drafter-editor] .de-hello-top span{font-size:14px;color:var(--muted)}
-[data-drafter-editor] .de-greet{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--surface)}
+[data-drafter-editor] .de-greet{margin-top:0;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface)}
 [data-drafter-editor] .de-greet b{font-size:16px}
 [data-drafter-editor] .de-greet b em{font-style:normal;color:var(--brand-text)}
-[data-drafter-editor] .de-greet p{margin:6px 0 0;font-size:13.5px;color:var(--muted);line-height:1.6}
+[data-drafter-editor] .de-greet p{margin:4px 0 0;font-size:13px;color:var(--muted);line-height:1.5}
 [data-drafter-editor] .de-label{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600}
-[data-drafter-editor] .de-quick{display:flex;flex-direction:column;gap:6px}
-[data-drafter-editor] .de-quick button{padding:9px 12px;border-radius:11px;border:1px solid var(--line);background:transparent;color:var(--muted);text-align:left;font-size:13px;cursor:pointer}
+/* Quick actions as small pills that wrap (2026-10-11). */
+[data-drafter-editor] .de-quick{display:flex;flex-wrap:wrap;gap:6px}
+/* The panel stays put; whatever is inside it -- the opening note or the
+   conversation -- scrolls within it, on a slim bar. */
+[data-drafter-editor] .de-assist-body::-webkit-scrollbar{width:6px}
+[data-drafter-editor] .de-assist-body::-webkit-scrollbar-thumb{border-radius:6px;background:color-mix(in srgb,var(--ink) 22%,transparent)}
+[data-drafter-editor] .de-assist-body::-webkit-scrollbar-track{background:transparent}
+[data-drafter-editor] .de-quick button{padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);text-align:left;font-size:13px;cursor:pointer}
 [data-drafter-editor] .de-quick button:hover{border-color:var(--hover-line);background:var(--hover-tint);color:var(--hover-ink)}
 [data-drafter-editor] .de-msg{max-width:92%;padding:10px 13px;font-size:13.5px;line-height:1.6;white-space:pre-wrap}
 [data-drafter-editor] .de-msg.user{align-self:flex-end;border-radius:14px 14px 4px 14px;background:var(--teal);color:var(--on-teal)}
 [data-drafter-editor] .de-msg.ai{align-self:flex-start;border-radius:4px 14px 14px 14px;background:var(--surface-2);border:1px solid var(--line)}
 [data-drafter-editor] .de-dots{display:flex;gap:5px;padding:12px 16px}
 [data-drafter-editor] .de-dots i{width:6px;height:6px;border-radius:50%;background:var(--brand-text);animation:pulse 1.2s ease infinite}
-[data-drafter-editor] .de-compose{flex:none;padding:14px 18px 16px;border-top:1px solid var(--line)}
+[data-drafter-editor] .de-compose{flex:none;padding:14px 16px;border-top:1px solid var(--line)}
 [data-drafter-editor] .de-compose-box{border:1px solid var(--line);border-radius:18px;background:var(--surface-2);overflow:hidden}
 [data-drafter-editor] .de-compose-box:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
-[data-drafter-editor] .de-compose textarea{width:100%;border:0;outline:none;background:transparent;resize:none;padding:16px 18px 6px;font-size:15px;line-height:1.55}
+[data-drafter-editor] .de-compose textarea{width:100%;border:0;outline:none;background:transparent;resize:none;padding:12px 16px 2px;font-size:14px;line-height:1.5}
 [data-drafter-editor] .de-compose textarea::placeholder{color:var(--faint)}
-[data-drafter-editor] .de-compose-row{display:flex;justify-content:space-between;align-items:center;padding:4px 10px 10px 18px;gap:10px}
+[data-drafter-editor] .de-compose-row{display:flex;justify-content:space-between;align-items:center;padding:0 8px 8px 16px;gap:10px}
 [data-drafter-editor] .de-hint{font-size:11.5px;color:var(--faint)}
 [data-drafter-editor] .de-foot{font-size:11.5px;color:var(--faint);text-align:center;margin-top:9px}
 [data-drafter-editor] .de-send{overflow:hidden}
+/* Send: a small round arrow, like a chat app's (2026-10-11). */
+[data-drafter-editor] .de-send-ic{width:34px;height:34px;flex:none;display:grid;place-items:center;border:0;border-radius:50%;background:var(--brand-solid);color:var(--on-brand);cursor:pointer;transition:transform .15s,opacity .15s}
+[data-drafter-editor] .de-send-ic:hover:not(:disabled){transform:translateY(-1px)}
+[data-drafter-editor] .de-send-ic:disabled{opacity:.35;cursor:default}
+[data-drafter-editor] .de-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 [data-drafter-editor] .de-send:hover:not(:disabled) svg{animation:deFly .75s cubic-bezier(.5,0,.3,1)}
 [data-drafter-editor] .de-tb svg{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
 [data-drafter-editor] .de-tb:hover svg{transform:translateY(-1px) scale(1.12)}
@@ -131,103 +175,48 @@ function TB({ label, active, onClick, children, style }) {
 // ============================================================
 // STAGE 2 — EDITOR
 // ============================================================
-const _TONE = (t) => ({
-    ok: t.success, warn: t.warn || "#FFC857", danger: t.danger || "#e5484d", neutral: t.textMuted,
-});
 
-function CitationStrip({ t, draftCheck, stale, documentCheck }) {
+/* THE CITATION CHECK, ONLY WHEN IT MATTERS (2026-10-11). The always-on strip
+ * was noise. What stays is the one finding a lawyer must not miss: an
+ * authority the check could not find, or one that is repealed -- the kind of
+ * wrong citation that otherwise reaches a filed document. Shown for the draft
+ * as last saved; once the text changes the finding is about other words, so
+ * it goes until the next save checks again. Nothing is shown for a clean or
+ * an unchecked draft: no finding is not a pass, and is not claimed as one. */
+function CitationWarning({ draftCheck, stale }) {
     const d = verificationView(draftCheck);
-    const doc = verificationView(documentCheck);
-    const tone = _TONE(t);
+    if (!d || stale || d.tone !== "danger") return null;
     return (
-        <div data-citation-strip style={{
-            fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: "4px 18px",
-        }}>
-            <span data-check="draft">
-                <b style={{ color: "var(--ink)" }}>Citation check · last saved draft:</b>{" "}
-                {d ? <>
-                    <span style={{ color: stale ? t.textMuted : tone[d.tone], fontWeight: 700,
-                                   textDecoration: stale ? "line-through" : "none" }}>{d.headline}</span>
-                    {stale
-                        ? <span data-stale style={{ color: tone.warn, fontWeight: 700 }}> — out of date: the text has changed. Save again to re-check.</span>
-                        : d.detail && <span> — {d.detail}</span>}
-                </> : <span>not checked yet — citations are checked when you save.</span>}
-            </span>
-            {doc && (
-                <span data-check="document">
-                    <b style={{ color: "var(--ink)" }}>Copy saved to Documents (frozen):</b>{" "}
-                    <span style={{ color: tone[doc.tone], fontWeight: 700 }}>{doc.headline}</span>
-                </span>
-            )}
-        </div>
+        <span className="de-note bad" role="alert" data-citation-warning title={d.detail}>
+            ⚠ {d.headline}
+        </span>
     );
 }
 
-/* WHAT THE CODE REQUIRES OF THIS INSTRUMENT — for the lawyer to confirm.
- *
- * A prose draft cannot be judged by the field-based compliance check, and
- * deciding from free text that a clause is "satisfied" would be a false pass in
- * a court document. So this lists the requirements with their rule and a hint,
- * and says plainly that nothing was checked. The ticks are the lawyer's own
- * working notes for this session; they are not saved and certify nothing. */
-function RequirementsChecklist({ t, report }) {
-    const [open, setOpen] = useState(false);
-    const [ticked, setTicked] = useState(() => new Set());
-    if (!report?.covered || !report.items?.length) return null;
-    const toggle = i => setTicked(prev => {
-        const next = new Set(prev);
-        next.has(i) ? next.delete(i) : next.add(i);
-        return next;
-    });
-    return (
-        <div data-requirements style={{ fontSize: 12, color: "var(--muted)" }}>
-            <button type="button" onClick={() => setOpen(o => !o)} style={{
-                background: "transparent", border: "none", padding: 0, cursor: "pointer",
-                color: "var(--ink)", fontSize: 12, fontWeight: 700,
-            }}>
-                {open ? "▾" : "▸"} Requirements checklist · {report.basis} — {ticked.size}/{report.items.length} confirmed by you
-            </button>
-            <span> · not checked automatically: confirm each against your draft.</span>
-            {open && (
-                <ul style={{ listStyle: "none", margin: "6px 0 2px", padding: 0 }}>
-                    {report.items.map((item, i) => (
-                        <li key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
-                            <input type="checkbox" checked={ticked.has(i)} onChange={() => toggle(i)}
-                                   aria-label={`Confirmed: ${item.clause}`} style={{ marginTop: 2 }} />
-                            <span>
-                                <b style={{ color: t.textDim }}>{item.clause}</b> — {item.requirement}
-                                {item.conditional_on && <i> (only if applicable)</i>}
-                                {item.hint && <span style={{ color: t.textFaint }}> · {item.hint}</span>}
-                            </span>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </div>
-    );
-}
-
-function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
+function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t, cases = [], onRebind }) {
     // The case this document is bound to — fixed when the editor opened, never
     // the page selector's current value. See lib/draftCaseBinding.js.
     const caseObj = binding.caseObj;
     const caseId = boundCaseId(binding);
     const { setPage } = useCase();
     const caseBlocked = caseActionsBlocked(binding);
-    // The instrument this draft is, when the system knows one. A reopened draft
-    // may carry only the template's name, so the catalogue is asked by name too.
-    const requirementsType = tmpl?.template_type
-        || TEMPLATES.find(x => x.name === tmpl?.name)?.template_type || null;
-    const [requirements, setRequirements] = useState(null);
+    const [caseOpen, setCaseOpen] = useState(false);
+    const [saveOpen, setSaveOpen] = useState(false);
+    const [justPublished, setJustPublished] = useState(false);
+    const caseRef = useRef(null), saveRef = useRef(null);
     useEffect(() => {
-        if (!requirementsType) { setRequirements(null); return; }
-        let live = true;
-        pleadingRequirements(requirementsType).then(({ data }) => {
-            // Optional aid: a failed load shows no checklist rather than an error.
-            if (live) setRequirements(data || null);
-        });
-        return () => { live = false; };
-    }, [requirementsType]);
+        if (!caseOpen && !saveOpen) return undefined;
+        const onDown = e => {
+            if (!caseRef.current?.contains(e.target)) setCaseOpen(false);
+            if (!saveRef.current?.contains(e.target)) setSaveOpen(false);
+        };
+        const onKey = e => { if (e.key === "Escape") { setCaseOpen(false); setSaveOpen(false); } };
+        document.addEventListener("mousedown", onDown);
+        window.addEventListener("keydown", onKey);
+        return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+    }, [caseOpen, saveOpen]);
+    // The lawyer's own choice of case -- the only way the binding changes.
+    const pickCase = (c) => { setCaseOpen(false); onRebind?.(bindingForNewDocument(c)); };
     // A saved draft stores editor HTML; a fresh template is plain text
     const initialHtml = draft ? draft.content : buildContent(tmpl, caseObj).replace(/\n/g, "<br>");
     const [aiMessages, setAiMessages] = useState([]);
@@ -371,6 +360,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             return;
         }
         setPublished(res);
+        setJustPublished(true); setTimeout(() => setJustPublished(false), 3500);
     };
 
     const handleExport = () => {
@@ -509,8 +499,6 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
     const SIZE_OPTIONS = ["10", "11", "12", "13", "14", "16", "18", "20"];
     const mode = draftingMode(t);
-    const displayName = user?.full_name || "Advocate";
-    const initials = displayName.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
     const docFile = (draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document";
     const lineIcon = d => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
 
@@ -534,42 +522,93 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                     </div>
                 </div>
                 <div className="de-right">
-                    {saved && <span className="de-note ok"><Icon d={I.checkCircle} size={12} /> Draft Saved</span>}
+                    {saved && <span className="de-note ok"><Icon d={I.checkCircle} size={12} /> Saved to My Drafts</span>}
+                    {justPublished && <span className="de-note ok" role="status"><Icon d={I.checkCircle} size={12} /> PDF saved to the Vault</span>}
                     {saveErr && <span className="de-note bad" role="alert">{saveErr}</span>}
                     {publishIssue && <span className="de-note bad" role="alert">{publishIssue}</span>}
-                    <button type="button" className="de-btn primary" onClick={handleSave} disabled={saving || caseBlocked}>
-                        <Icon d={I.save} size={15} /> {saving ? "Saving…" : "Save Draft"}
-                    </button>
-                    {/* Beside Export, not instead of it. Export hands someone a
-                        file they will edit. This keeps the draft as an artifact the
-                        system can name, hash and reproduce — which is what makes a
-                        citation check on it mean anything later. It does NOT file
-                        anything with a court, and the label must not suggest so. */}
-                    <button type="button" className="de-btn" onClick={publishAsDocument} disabled={publishing || caseBlocked}
-                        title="Save a fixed, hashed copy of this draft into your documents">
-                        <Icon d={I.fileText} size={15} /> {publishing ? "Saving…" : published ? "Saved ✓" : "Save to Documents"}
-                    </button>
-                    {published && (
-                        <button type="button" className="de-btn"
-                            onClick={async () => {
-                                setPublishIssue("");
-                                const saved = await downloadDocumentFile(published.docId, `${docFile}.pdf`,
-                                    { revisionId: published.revisionId, expectedPdfSha256: published.pdfSha256 });
-                                if (saved?.error) setPublishIssue(saved.error);
-                            }}>
-                            <Icon d={I.download} size={15} /> Saved PDF
+                    <CitationWarning draftCheck={savedCheck} stale={checkStale} />
+                    {/* ONE SAVE (2026-10-11). Two side-by-side buttons, "Save Draft" and
+                        "Save to Documents", saved to two different places and said
+                        neither. Now the button saves the working draft (My Drafts, where
+                        it stays editable), and its menu holds the other save -- a fixed
+                        PDF copy kept in the Vault -- with where each one goes in words.
+                        The menu stays mounted while closed so its items keep their
+                        state. A Vault copy does NOT file anything with a court. */}
+                    <div className="de-drop de-save" ref={saveRef}>
+                        <button type="button" className="de-btn primary de-save-main" onClick={handleSave} disabled={saving || caseBlocked}
+                            title="Save your working draft. It stays in My Drafts, where you can keep editing it.">
+                            <Icon d={I.save} size={15} /> {saving ? "Saving…" : "Save Draft"}
                         </button>
-                    )}
-                    {/* Where the saved copy now lives: the lawyer's Vault, to file it
-                        into a folder or find it again. Not a dead end after saving. */}
-                    {published && (
-                        <button type="button" className="de-btn" data-open-vault onClick={() => setPage?.("vault")}>
-                            <Icon d={I.folder} size={15} /> Open in Vault
+                        <button type="button" className="de-btn primary de-save-more" aria-label="More ways to save"
+                            aria-haspopup="menu" aria-expanded={saveOpen} onClick={() => setSaveOpen(o => !o)}>
+                            <Icon d="m6 9 6 6 6-6" size={15} />
                         </button>
-                    )}
-                    <div className="de-acct" data-account>
-                        <span className="de-avatar" aria-hidden="true">{initials}</span>
-                        <span style={{ minWidth: 0 }}><b>{displayName}</b><small>Advocate</small></span>
+                        <div className="de-pop de-save-menu" role="menu" aria-label="Save" hidden={!saveOpen}>
+                            <button type="button" role="menuitem" className="de-opt" onClick={() => { setSaveOpen(false); handleSave(); }}
+                                disabled={saving || caseBlocked}>
+                                Save draft<small>Your working copy, in Legal Drafting → My Drafts. Stays editable.</small>
+                            </button>
+                            <button type="button" role="menuitem" className="de-opt" onClick={() => { setSaveOpen(false); publishAsDocument(); }}
+                                disabled={publishing || caseBlocked}
+                                title="Save a fixed, hashed copy of this draft into your documents">
+                                {publishing ? "Saving PDF…" : published ? "Save a new PDF copy to the Vault" : "Save as PDF to the Vault"}
+                                <small>A fixed PDF in Documents → Vault{caseId ? ", filed under this case" : ""}. It cannot be edited; save again for a new copy.</small>
+                            </button>
+                            {/* Where the saved copy lives, once there is one. */}
+                            {published && <>
+                                <div className="de-sep-h" aria-hidden="true" />
+                                <button type="button" role="menuitem" className="de-opt" data-open-vault
+                                    onClick={() => { setSaveOpen(false); setPage?.("vault"); }}>
+                                    Open in Vault<small>Where the PDF copy is kept</small>
+                                </button>
+                                <button type="button" role="menuitem" className="de-opt"
+                                    onClick={async () => {
+                                        setSaveOpen(false); setPublishIssue("");
+                                        const saved = await downloadDocumentFile(published.docId, `${docFile}.pdf`,
+                                            { revisionId: published.revisionId, expectedPdfSha256: published.pdfSha256 });
+                                        if (saved?.error) setPublishIssue(saved.error);
+                                    }}>
+                                    Saved PDF — download<small>The copy kept in the Vault</small>
+                                </button>
+                            </>}
+                        </div>
+                    </div>
+                    {/* Which matter this document belongs to (2026-10-11): one button in
+                        place of the account. The binding changes ONLY when the lawyer
+                        picks another case here -- never by itself; see
+                        lib/draftCaseBinding.js. */}
+                    <div className="de-drop" ref={caseRef}>
+                        <button type="button" className="de-case" data-case-binding={binding.state}
+                            aria-haspopup="listbox" aria-expanded={caseOpen} onClick={() => setCaseOpen(o => !o)}
+                            title={binding.state === "unavailable"
+                                ? "This draft's case could not be loaded. Save, AI drafting and Save to Documents are paused."
+                                : "The case this draft belongs to"}>
+                            <span className="ic"><Icon d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" size={16} /></span>
+                            <span style={{ minWidth: 0, flex: 1 }}>
+                                {binding.state === "bound" && <><b>{caseObj?.id} — {caseObj?.title}</b><small>{caseObj?.client}</small></>}
+                                {binding.state === "none" && <><b>No case</b><small>Standalone document</small></>}
+                                {binding.state === "loading" && <><b>Loading case…</b><small>Please wait</small></>}
+                                {binding.state === "unavailable" && <><b>Case unavailable</b><small>Saving is paused</small></>}
+                            </span>
+                            <Icon d="m6 9 6 6 6-6" size={14} />
+                        </button>
+                        {caseOpen && (
+                            <div className="de-pop" role="listbox" aria-label="Choose the case">
+                                <h3>Attach to a case</h3>
+                                <button type="button" role="option" className="de-opt"
+                                    aria-selected={binding.state === "none"} onClick={() => pickCase(null)}>
+                                    No case<small>Standalone document</small>
+                                </button>
+                                {cases.map(c => (
+                                    <button key={c._id} type="button" role="option" className="de-opt"
+                                        aria-selected={binding.state === "bound" && binding.caseId === c._id}
+                                        onClick={() => pickCase(c)}>
+                                        {c.id} — {c.title}<small>{c.client} · {c.type} · {c.status}</small>
+                                    </button>
+                                ))}
+                                {cases.length === 0 && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--muted)" }}>You have no cases yet.</div>}
+                            </div>
+                        )}
                     </div>
                 </div>
             </header>
@@ -577,7 +616,12 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             <div className="de-stage">
                 {/* ── Formatting toolbar ── */}
                 <div className="de-tools">
-                <div className="de-toolbar" role="toolbar" aria-label="Formatting">
+                <div className="de-toolbar" role="toolbar" aria-label="Formatting"
+                    onWheel={e => {
+                        // With the scrollbar hidden, a mouse wheel moves the bar along.
+                        const el = e.currentTarget;
+                        if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
+                    }}>
                     <TB label="Undo (Ctrl+Z)" onClick={() => exec("undo")}>{lineIcon(<><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>)}</TB>
                     <TB label="Redo (Ctrl+Y)" onClick={() => exec("redo")}>{lineIcon(<><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /></>)}</TB>
                     <span className="de-sep" />
@@ -624,31 +668,17 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                 <div className="de-split">
                     {/* ── The document ── */}
                     <section className="de-doc" aria-label="Document">
-                        <div className="de-strips">
-                            {/* Which matter this document belongs to: the page's case
-                                selector is not visible here, so without this the lawyer
-                                cannot see which case the AI and Save act on. */}
-                            <div data-case-binding={binding.state} style={{
-                                fontWeight: 600,
-                                background: binding.state === "unavailable" ? "var(--danger-soft)" : "transparent",
-                                color: binding.state === "unavailable" ? "var(--danger)" : "var(--muted)",
-                            }}>
-                                {binding.state === "bound" && <>Case: {caseObj?.id} — {caseObj?.title}</>}
-                                {binding.state === "none" && <>No case — this draft is not attached to any matter.</>}
-                                {binding.state === "loading" && <>Loading the case this draft belongs to…</>}
-                                {binding.state === "unavailable" && <>
+                        {/* The one note that stays on the page: the actions it explains
+                            are paused, so the lawyer must see why. */}
+                        {binding.state === "unavailable" && (
+                            <div className="de-strips" role="alert">
+                                <div style={{ fontWeight: 600, background: "var(--danger-soft)", color: "var(--danger)" }}>
                                     This draft belongs to a case that could not be loaded — it may have been
                                     reassigned, or you may be offline. Save, AI drafting and Save to Documents
                                     are paused so this draft is not attached to another matter. Export still works.
-                                </>}
+                                </div>
                             </div>
-                            {/* Citation check — the server's, not the browser's: the
-                                draft as last saved (stale on edit) and the copy saved
-                                to Documents (frozen). */}
-                            <CitationStrip t={t} draftCheck={savedCheck} stale={checkStale}
-                                documentCheck={published?.verification ?? null} />
-                            <RequirementsChecklist t={t} report={requirements} />
-                        </div>
+                        )}
                         <div className="de-scroll">
                             <div
                                 ref={editorRef}
@@ -661,7 +691,6 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                                 style={{ fontFamily: font === "Default Font" ? "Georgia, 'Times New Roman', serif" : font }}
                                 dangerouslySetInnerHTML={{ __html: initialHtml }}
                             />
-                            <div className="de-page">— Page 1 —</div>
                         </div>
                     </section>
 
@@ -669,17 +698,11 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                     <aside className="de-assist" aria-label="Draft Assistant">
                         <div className="de-assist-head">
                             <b>Draft Assistant</b>
-                            <span>Prompt edits and improvements</span>
                         </div>
                         <div className="de-assist-body">
                             {aiMessages.length === 0 && (
                                 <>
                                     <div className="de-hello">
-                                        <div className="de-hello-top">
-                                            <span className="de-hello-ic"><Icon d={I.sparkles} size={24} /></span>
-                                            <span style={{ flex: 1, minWidth: 0 }}><b>AI Drafter Assistant</b><span>Your legal drafting co-pilot</span></span>
-                                            <span aria-hidden="true" style={{ color: "var(--gold)", alignSelf: "flex-start" }}><Icon d={h < 17 ? I.sun : I.moon} size={22} /></span>
-                                        </div>
                                         <div className="de-greet">
                                             <b>{greeting}, <em>{userName}</em></b>
                                             <p><strong style={{ color: "var(--ink)" }}>{tmpl.name}</strong> is loaded. Ask for a new clause, a rewrite, a tone change or an improvement to the current draft.</p>
@@ -687,8 +710,10 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                                     </div>
                                     <div className="de-label">Quick actions</div>
                                     <div className="de-quick">
-                                        {["Add a stronger prayer clause", "Make the tone more formal", "Add a jurisdiction paragraph", "Summarise key arguments"].map(text => (
-                                            <button key={text} type="button" onClick={() => { setAiInput(text); aiInputRef.current?.focus(); }}>{text}</button>
+                                        {/* A short name on the pill; the full instruction goes into the prompt. */}
+                                        {[["Stronger prayer", "Add a stronger prayer clause"], ["Formal tone", "Make the tone more formal"],
+                                          ["Jurisdiction", "Add a jurisdiction paragraph"], ["Key arguments", "Summarise key arguments"]].map(([label, text]) => (
+                                            <button key={text} type="button" title={text} onClick={() => { setAiInput(text); aiInputRef.current?.focus(); }}>{label}</button>
                                         ))}
                                     </div>
                                 </>
@@ -708,16 +733,17 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                                     value={aiInput} onChange={e => setAiInput(e.target.value)}
                                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendToAI(); } }}
                                     placeholder="Enter prompt to generate or modify draft"
-                                    rows={3}
+                                    rows={1}
                                 />
                                 <div className="de-compose-row">
                                     <span className="de-hint">Enter to send · Shift+Enter for a new line</span>
-                                    <button type="button" className="de-btn primary de-send" style={{ height: 36 }} onClick={sendToAI} disabled={!aiInput.trim() || aiLoading || caseBlocked}>
-                                        <Icon d={I.send} size={13} /> Generate
+                                    <button type="button" className="de-send-ic" onClick={sendToAI} disabled={!aiInput.trim() || aiLoading || caseBlocked}
+                                        aria-label="Generate" title="Generate (Enter)">
+                                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+                                        <span className="de-sr">Generate</span>
                                     </button>
                                 </div>
                             </div>
-                            <div className="de-foot">AI-generated draft — verify before filing</div>
                         </div>
                     </aside>
                 </div>
@@ -857,18 +883,6 @@ function DocAutomationPage() {
     // applied twice and left an empty band beside the sidebar.
     return (
         <div data-drafter-pane style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0, background: t.bg }}>
-            {/* Case selector strip — always visible */}
-            {apiCases.length > 0 && (
-                <div style={{ flexShrink: 0, padding: "8px 24px", background: t.surface, borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 12, color: t.textMuted, fontWeight: 600 }}>Case context:</span>
-                    <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)}
-                        style={{ height: 32, border: `1px solid ${t.border}`, borderRadius: 8, background: t.inputBg, color: t.text, fontSize: 12, padding: "0 12px", outline: "none", cursor: "pointer", minWidth: 260 }}>
-                        <option value="">No case — standalone document</option>
-                        {apiCases.map(c => <option key={c.id} value={c.id} style={{ background: t.surface }}>{c.id} — {c.title}</option>)}
-                    </select>
-                    {activeCaseObj && <span style={{ fontSize: 11, color: t.primary, fontWeight: 600 }}>{activeCaseObj.type} · {activeCaseObj.status}</span>}
-                </div>
-            )}
             {stage === "gallery" && (
                 <DraftingHome
                     onSelect={openTemplate}
@@ -879,7 +893,8 @@ function DocAutomationPage() {
                 />
             )}
             {stage === "editor" && selectedTemplate && (
-                <StageEditor tmpl={selectedTemplate} binding={editorBinding} draft={activeDraft} onBack={() => setStage("gallery")} t={t} />
+                <StageEditor tmpl={selectedTemplate} binding={editorBinding} draft={activeDraft} onBack={() => setStage("gallery")} t={t}
+                    cases={apiCases} onRebind={b => { ++openSeq.current; setEditorBinding(b); }} />
             )}
         </div>
     );

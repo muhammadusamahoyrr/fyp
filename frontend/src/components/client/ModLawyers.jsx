@@ -7,6 +7,8 @@ import { useT } from "./theme.js";
 import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
+import { readProblem, PROBLEM_MAX_LENGTH } from "@/lib/problemFilters";
+import { DOCS_FONT } from "./documents/ui.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getBookableSlots, listCases, listHireConsultations, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
@@ -38,14 +40,6 @@ const CITY_TO_PROVINCE = {
 // Directory page size.
 const PAGE_SIZE = 20;
 
-const SPEC_TO_CASE_TYPE = {
-    "employment law": "civil", "civil rights": "civil", "contract": "civil", "property": "civil",
-    "criminal defense": "criminal", "criminal": "criminal",
-    "family law": "family", "family": "family",
-    "constitutional": "constitutional",
-    "civil": "civil",
-};
-
 /* ══════════════════════════════════════════════════════
    MODULE: LAWYER DISCOVERY
 ══════════════════════════════════════════════════════ */
@@ -58,6 +52,379 @@ function openByCase(engagements) {
     (engagements || []).filter(e => OPEN_ENGAGEMENT.has(e.status)).forEach(e => { m[e.case_id] = e; });
     return m;
 }
+
+/* The directory toolbar's look (2026-10-10), scoped by [data-lawyers-tools];
+ * colours are the client tokens (clientTheme.js). */
+const LAWYERS_TOOLS_CSS = `[data-lawyers-tools] .lt-search{flex:1 1 360px;display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;box-sizing:border-box;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-rest);transition:border-color .15s,box-shadow .15s}
+[data-lawyers-tools] .lt-search:hover{box-shadow:0 10px 24px -14px rgba(0,0,0,.75)}
+[data-lawyers-tools] .lt-search svg{transition:color .2s,transform .2s}
+[data-lawyers-tools] .lt-search:hover>svg:first-child{color:var(--brand-text);transform:scale(1.1)}
+[data-lawyers-tools] .lt-search:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-lawyers-tools] .lt-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:15px}
+[data-lawyers-tools] .lt-search input::placeholder{color:var(--faint)}
+[data-lawyers-tools] .lt-search input::-webkit-search-cancel-button{display:none}
+[data-lawyers-tools] .lt-kbd{font:500 11px "JetBrains Mono",monospace;color:var(--faint);border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;padding:0 6px;line-height:18px}
+[data-lawyers-tools] .lt-clear{background:none;border:0;color:var(--muted);cursor:pointer;font-size:20px;line-height:1}
+[data-lawyers-tools] .lt-pill{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 15px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .2s,transform .15s}
+[data-lawyers-tools] .lt-pill:hover{background:var(--hover);transform:translateY(-1px);box-shadow:0 8px 18px -12px rgba(0,0,0,.7)}
+[data-lawyers-tools] .lt-pill:active{transform:scale(.97)}
+[data-lawyers-tools] .lt-pill[data-open]{border-color:var(--hover-line);background:var(--hover-tint)}
+[data-lawyers-tools] .lt-pill>svg:first-child{transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
+[data-lawyers-tools] .lt-pill[aria-expanded]:hover>svg:first-child{transform:scaleX(.78)}
+[data-lawyers-tools] .lt-sort:not([data-open]) .lt-pill:hover .chev{transform:translateY(2px)}
+[data-lawyers-tools] .lt-pill .muted{color:var(--faint);font-weight:500}
+[data-lawyers-tools] .lt-accepting{border-color:color-mix(in srgb,var(--brand-text) 30%,transparent);background:color-mix(in srgb,var(--brand-text) 8%,transparent)}
+[data-lawyers-tools] .lt-accepting[aria-pressed="true"]{border-color:color-mix(in srgb,var(--brand-text) 60%,transparent);background:color-mix(in srgb,var(--brand-text) 18%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 12%,transparent)}
+[data-lawyers-tools] .lt-accepting .dot{width:8px;height:8px;border-radius:50%;background:var(--brand-text);box-shadow:0 0 8px var(--brand-text);opacity:.55;transition:opacity .15s}
+[data-lawyers-tools] .lt-accepting[aria-pressed="true"] .dot{opacity:1}
+[data-lawyers-tools] .lt-accepting:hover{background:color-mix(in srgb,var(--brand-text) 16%,transparent)}
+[data-lawyers-tools] .lt-accepting:hover .dot{opacity:1;animation:ltPulse 1.1s ease-out infinite}
+@keyframes ltPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--brand-text) 70%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+[data-lawyers-tools] .lt-count{min-width:20px;height:20px;padding:0 5px;box-sizing:border-box;border-radius:999px;display:grid;place-items:center;background:var(--teal-ink);color:var(--on-teal);font-size:11.5px;font-weight:700}
+[data-lawyers-tools] .lt-sort{position:relative}
+[data-lawyers-tools] .lt-icon{width:40px;height:40px;flex:none;border-radius:11px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);display:grid;place-items:center;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+[data-lawyers-tools] .lt-icon:hover{background:var(--hover-tint);color:var(--hover-ink)}
+[data-lawyers-tools] .lt-icon[data-open],[data-lawyers-tools] .lt-icon[aria-pressed="true"]{border-color:var(--hover-line);background:var(--hover-tint);color:var(--hover-ink)}
+[data-lawyers-tools] .lt-sort .chev{transition:transform .15s}
+[data-lawyers-tools] .lt-sort[data-open] .chev{transform:rotate(180deg)}
+[data-lawyers-tools] .lt-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:30;min-width:220px;padding:4px;border-radius:12px;background:var(--surface);border:1px solid var(--line-strong);box-shadow:0 18px 36px -12px rgba(0,0,0,.6)}
+[data-lawyers-tools] .lt-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:13px;font-weight:500;text-align:left;cursor:pointer}
+[data-lawyers-tools] .lt-menu button[data-hot]{background:var(--hover-tint);color:var(--hover-ink)}
+[data-lawyers-tools] .lt-menu button[aria-selected="true"]{color:var(--brand-text);font-weight:600}
+[data-lawyers-tools].lt-areas{scrollbar-width:none;-ms-overflow-style:none;padding:2px 0}
+[data-lawyers-tools].lt-areas::-webkit-scrollbar{display:none}
+[data-lawyers-tools] .lt-area{flex:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 13px;border-radius:999px;border:1px solid transparent;background:var(--surface);color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background .15s,border-color .15s,transform .12s}
+[data-lawyers-tools] .lt-area:hover{background:color-mix(in srgb,var(--c,var(--brand-text)) 16%,var(--surface))}
+[data-lawyers-tools] .lt-area:hover .dot{transform:scale(1.35);box-shadow:0 0 8px var(--c)}
+[data-lawyers-tools] .lt-area:active{transform:scale(.96)}
+[data-lawyers-tools] .lt-area[aria-pressed="true"]{border-color:color-mix(in srgb,var(--brand-text) 55%,transparent);background:color-mix(in srgb,var(--brand-text) 14%,var(--surface-2))}
+[data-lawyers-tools] .lt-area .dot{width:8px;height:8px;border-radius:50%;background:var(--c);transition:transform .2s cubic-bezier(.3,1.4,.5,1),box-shadow .2s}
+[data-lawyers-tools] .lt-radio .rd{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid var(--faint);box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
+[data-lawyers-tools] .lt-radio[aria-checked="true"] .rd{border-color:var(--brand-text);box-shadow:inset 0 0 0 3px var(--surface-2),inset 0 0 0 7px var(--brand-text)}
+[data-lawyers-tools] .lt-area .n{font-size:12px;font-weight:700;color:var(--faint)}`;
+
+/* Every practice area a lawyer can list on their profile (the server's
+ * `specialization` filter, backend PRACTICE_AREAS), each with its colour:
+ * [label, value, colour]. "Employment" is the profile's `labour`. */
+const AREA_CHIPS = [
+    ["Family", "family", "#5EE6B0"], ["Criminal", "criminal", "#FF8A80"], ["Civil", "civil", "#8DB4F0"],
+    ["Property", "property", "#E0B48A"], ["Corporate", "corporate", "#B9A6F2"], ["Employment", "labour", "#F2C35E"],
+    ["Constitutional", "constitutional", "#6ADDEB"],
+    // Banking, tax and cyber stay filterable on the server; not offered here (2026-10-10).
+];
+
+// What each server sort is called in the menu.
+const SORT_LABEL = {
+    "Rating: High to Low": "Top rated", "Rating: Low to High": "Lowest rated",
+    "Price: Low to High": "Fee: low to high", "Price: High to Low": "Fee: high to low",
+    "Experience: High": "Most experienced", "A–Z": "Name: A–Z", "Z–A": "Name: Z–A",
+};
+
+/* "Sort: Top rated" with the app's own menu (arrow keys, Enter, Escape). The
+ * real <select> stays, visually hidden, as the value's source of truth. */
+function LawyerSort({ value, options, onChange, compact = false }) {
+    const [open, setOpen] = useState(false);
+    const [hot, setHot] = useState(0);
+    const boxRef = useRef(null);
+    useEffect(() => {
+        if (!open) return undefined;
+        const out = e => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+        document.addEventListener("mousedown", out);
+        return () => document.removeEventListener("mousedown", out);
+    }, [open]);
+    const show = () => { setHot(Math.max(0, options.indexOf(value))); setOpen(true); };
+    const pick = v => { onChange(v); setOpen(false); };
+    const onKey = e => {
+        if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) { e.preventDefault(); show(); return; }
+        if (!open) return;
+        if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+        else if (e.key === "ArrowDown") { e.preventDefault(); setHot(h => Math.min(options.length - 1, h + 1)); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); setHot(h => Math.max(0, h - 1)); }
+        else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(options[hot]); }
+        else if (e.key === "Tab") setOpen(false);
+    };
+    return (
+        <div ref={boxRef} className="lt-sort" data-open={open ? "true" : undefined}>
+            <button type="button" className={compact ? "lt-icon" : "lt-pill"} data-open={open ? "true" : undefined} aria-haspopup="listbox" aria-expanded={open}
+                aria-label={`Sort: ${SORT_LABEL[value] || value}`} title={compact ? `Sort: ${SORT_LABEL[value] || value}` : undefined}
+                onClick={() => (open ? setOpen(false) : show())} onKeyDown={onKey}>
+                {compact ? (
+                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4" /></svg>
+                ) : (<>
+                    <span className="muted">Sort:</span> {SORT_LABEL[value] || value}
+                    <svg className="chev" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--faint)" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                </>)}
+            </button>
+            <select value={value} onChange={e => onChange(e.target.value)} tabIndex={-1} aria-hidden="true"
+                style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none", overflow: "hidden", clip: "rect(0 0 0 0)" }}>
+                {options.map(s => <option key={s}>{s}</option>)}
+            </select>
+            {open && (
+                <div role="listbox" aria-label="Sort lawyers" className="lt-menu">
+                    {options.map((s, i) => (
+                        <button key={s} type="button" role="option" aria-selected={s === value} data-hot={i === hot ? "true" : undefined}
+                            onMouseEnter={() => setHot(i)} onMouseDown={e => e.preventDefault()} onClick={() => pick(s)}>
+                            {SORT_LABEL[s] || s}
+                            {s === value && <svg style={{ marginLeft: "auto" }} width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* The map view (2026-10-10), scoped by [data-lawyers-map]; client tokens. */
+const LAWYERS_MAP_CSS = `[data-lawyers-map]{background:var(--surface-2)}
+[data-lawyers-map-page] .lm-pagehead{display:flex;align-items:center;gap:12px;margin:0 0 14px}
+[data-lawyers-map-page] .lm-pagehead .lm-title{margin:0;font-family:"Nunito Sans",system-ui,sans-serif;font-size:24px;font-weight:700;color:var(--ink);line-height:1.2}
+[data-lawyers-map-page] .lm-pagehead .lm-sub{font-size:13px;color:var(--faint);margin-top:2px}
+[data-lawyers-map-page] .lm-back{display:inline-flex;align-items:center;gap:9px;height:42px;padding:0 16px 0 5px;flex:none;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-rest);transition:background .2s,box-shadow .2s,transform .15s}
+[data-lawyers-map-page] .lm-back .ic{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent);transition:background .2s,color .2s}
+[data-lawyers-map-page] .lm-back svg{transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
+[data-lawyers-map-page] .lm-back:hover{background:var(--hover);box-shadow:0 10px 22px -14px rgba(0,0,0,.75)}
+[data-lawyers-map-page] .lm-back:hover .ic{background:var(--brand-solid);color:var(--on-brand)}
+[data-lawyers-map-page] .lm-back:hover svg{transform:translateX(-3px)}
+[data-lawyers-map-page] .lm-back:active{transform:scale(.97)}
+[data-lawyers-map-page] .lm-toggle{display:inline-flex;align-items:center;gap:9px;height:42px;padding:0 16px 0 5px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-rest);transition:background .2s,box-shadow .2s,transform .15s}
+[data-lawyers-map-page] .lm-toggle .ic{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:var(--muted);background:var(--surface-2);transition:background .2s,color .2s}
+[data-lawyers-map-page] .lm-toggle[aria-pressed="true"] .ic{color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-lawyers-map-page] .lm-toggle .ic svg{transition:transform .3s cubic-bezier(.3,1.4,.5,1)}
+[data-lawyers-map-page] .lm-toggle:hover{background:var(--hover);box-shadow:0 10px 22px -14px rgba(0,0,0,.75)}
+[data-lawyers-map-page] .lm-toggle:hover .ic{background:var(--brand-solid);color:var(--on-brand)}
+[data-lawyers-map-page] .lm-toggle[aria-pressed="true"]:hover .ic svg{transform:translateX(-2px) scaleX(.85)}
+[data-lawyers-map-page] .lm-toggle[aria-pressed="false"]:hover .ic svg{transform:translateX(2px) scaleX(1.1)}
+[data-lawyers-map-page] .lm-toggle:active{transform:scale(.97)}
+[data-lawyers-map-page] .lm-toggle .n{min-width:20px;height:20px;padding:0 6px;box-sizing:border-box;border-radius:999px;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 14%,transparent)}
+[data-lawyers-map] .lm-panel{position:absolute;left:14px;top:14px;bottom:14px;z-index:600;width:min(320px,calc(100% - 28px));display:flex;flex-direction:column;min-height:0;border-radius:18px;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line-strong);box-shadow:0 24px 48px -24px rgba(0,0,0,.75);transition:transform .32s cubic-bezier(.4,0,.2,1),opacity .25s ease}
+[data-lawyers-map] .lm-panel[data-closed]{transform:translateX(calc(-100% - 24px));opacity:0;pointer-events:none}
+[data-lawyers-map] .lm-head{display:flex;align-items:center;gap:10px;padding:14px 14px 12px}
+[data-lawyers-map] .lm-fold{width:36px;height:36px;flex:none;border-radius:11px;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:background .15s,color .15s}
+[data-lawyers-map] .lm-fold:hover{background:var(--hover-tint);color:var(--hover-ink)}
+[data-lawyers-map] .lm-tools{display:flex;align-items:center;gap:8px;padding:12px 12px 10px}
+[data-lawyers-map] .lm-seg{display:inline-flex;gap:2px;padding:3px;border-radius:11px;background:var(--surface-2);border:1px solid var(--line)}
+[data-lawyers-map] .lm-seg button{width:32px;height:32px;border-radius:8px;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:background .15s,color .15s}
+[data-lawyers-map] .lm-seg button:hover{color:var(--hover-ink)}
+[data-lawyers-map] .lm-seg button[aria-pressed="true"]{background:var(--chip-on-bg);color:var(--chip-on-ink)}
+[data-lawyers-map] .lm-reopen{position:absolute;left:14px;top:14px;z-index:600;display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px 0 11px;border-radius:12px;border:1px solid var(--line-strong);background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(10px);color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:0 12px 24px -14px rgba(0,0,0,.7);animation:lmIn .22s ease}
+[data-lawyers-map] .lm-reopen:hover{border-color:var(--hover-line);color:var(--hover-ink)}
+[data-lawyers-map] .lm-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+[data-lawyers-map] .lm-list[data-grid]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}
+[data-lawyers-map] .lm-list[data-grid] .lm-card{flex-direction:column;gap:8px;padding:10px}
+[data-lawyers-map] .lm-list[data-grid] .lm-av{width:100%;height:64px}
+[data-lawyers-map] .lm-back{width:36px;height:36px;flex:none;border-radius:11px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);display:grid;place-items:center;cursor:pointer;transition:background .15s,border-color .15s}
+[data-lawyers-map] .lm-back:hover{background:var(--hover-tint);color:var(--hover-ink)}
+[data-lawyers-map] .lm-back svg{transition:transform .2s}
+[data-lawyers-map] .lm-back:hover svg{transform:translateX(-2px)}
+[data-lawyers-map] .lm-title{font-size:17px;font-weight:700;color:var(--ink)}
+[data-lawyers-map] .lm-sub{font-size:12.5px;color:var(--faint)}
+[data-lawyers-map] .lm-search{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:40px;margin:0;padding:0 12px;border-radius:11px;background:var(--surface-2);border:1px solid var(--line);transition:border-color .15s,box-shadow .15s}
+[data-lawyers-map] .lm-search:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-lawyers-map] .lm-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:14px}
+[data-lawyers-map] .lm-search input::placeholder{color:var(--faint)}
+[data-lawyers-map] .lm-list{flex:1;min-height:0;overflow-y:auto;padding:2px 12px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin}
+[data-lawyers-map] .lm-card{display:flex;gap:12px;padding:12px;border-radius:16px;background:var(--surface-2);border:1px solid var(--line);cursor:pointer;outline:none;transition:border-color .15s,background .15s,transform .15s}
+[data-lawyers-map] .lm-card:hover,[data-lawyers-map] .lm-card:focus-visible{border-color:var(--hover-line);transform:translateY(-1px)}
+[data-lawyers-map] .lm-card[data-on]{border-color:color-mix(in srgb,var(--brand-text) 65%,transparent);background:color-mix(in srgb,var(--brand-text) 9%,var(--surface-2));box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 12%,transparent)}
+[data-lawyers-map] .lm-av{width:64px;height:76px;flex:none;border-radius:12px;display:grid;place-items:center;font-size:20px;font-weight:700;color:var(--teal-ink);background:radial-gradient(120% 100% at 100% 0%,color-mix(in srgb,var(--teal-ink) 22%,transparent),transparent 60%),color-mix(in srgb,var(--teal-ink) 12%,var(--surface))}
+[data-lawyers-map] .lm-name{font-size:14.5px;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-lawyers-map] .lm-meta{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-lawyers-map] .lm-rate{color:var(--gold);font-weight:600}
+[data-lawyers-map] .lm-rate[data-none]{color:var(--faint);font-weight:500}
+[data-lawyers-map] .lm-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px;font-size:12px;color:var(--faint)}
+[data-lawyers-map] .lm-foot b{font-size:14px;color:var(--ink)}
+[data-lawyers-map] .lm-tag{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 14%,transparent)}
+[data-lawyers-map] .lm-tag[data-off]{color:var(--faint);background:var(--chip-n)}
+[data-lawyers-map] .lm-pop{position:absolute;top:16px;right:70px;z-index:700;width:min(320px,calc(100% - 96px));border-radius:18px;overflow:hidden;background:var(--surface);border:1px solid var(--line-strong);box-shadow:0 24px 48px -20px rgba(0,0,0,.75);animation:lmIn .22s cubic-bezier(.34,1.56,.64,1)}
+[data-lawyers-map] .lm-pop-band{position:relative;height:96px;display:grid;place-items:center;background:radial-gradient(120% 140% at 0% 0%,color-mix(in srgb,var(--brand-text) 30%,transparent),transparent 60%),linear-gradient(135deg,color-mix(in srgb,var(--teal-ink) 35%,var(--surface-2)),var(--surface-2))}
+[data-lawyers-map] .lm-pop-av{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:20px;font-weight:700;color:var(--on-brand);background:var(--brand-solid);box-shadow:0 0 0 4px color-mix(in srgb,var(--surface) 70%,transparent)}
+[data-lawyers-map] .lm-close{position:absolute;top:10px;right:10px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(255,255,255,.92);color:#1E1C21;display:grid;place-items:center;cursor:pointer}
+[data-lawyers-map] .lm-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+[data-lawyers-map] .lm-facts div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-right:1px solid var(--line)}
+[data-lawyers-map] .lm-facts div:last-child{border-right:0}
+[data-lawyers-map] .lm-facts b{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-lawyers-map] .lm-facts span{font-size:11px;color:var(--faint)}
+[data-lawyers-map] .lm-km{color:var(--teal-ink);font-weight:700}
+[data-lawyers-map] .lm-addr{display:flex;align-items:flex-start;gap:7px;font-size:12.5px;line-height:1.45;color:var(--muted)}
+[data-lawyers-map] .lm-addr svg{flex:none;margin-top:2px;color:var(--teal-ink)}
+[data-lawyers-map] .lm-addr b{color:var(--teal-ink)}
+[data-lawyers-map] .lm-btn{flex:1;height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;text-decoration:none;border-radius:999px;border:0;background:var(--brand-solid);color:var(--on-brand);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+[data-lawyers-map] .lm-btn:disabled{background:var(--chip-n);color:var(--faint);cursor:not-allowed}
+[data-lawyers-map] .lm-btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line-strong)}
+[data-lawyers-map] .lm-btn.ghost:hover{background:var(--hover-tint);color:var(--hover-ink)}
+@keyframes lmIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}`;
+
+/* The directory's lawyer cards (2026-10-10), scoped by [data-lawyers-grid]. */
+const LAWYERS_CARD_CSS = `[data-lawyers-grid] .lc-card{display:flex;flex-direction:column;gap:11px;padding:16px;border-radius:18px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-rest);cursor:pointer;transition:transform .25s cubic-bezier(.22,1,.36,1),box-shadow .25s,border-color .2s,background .2s}
+[data-lawyers-grid] .lc-card:hover{transform:translateY(-4px);background:var(--hover);border-color:color-mix(in srgb,var(--brand-text) 45%,transparent);box-shadow:0 18px 34px -18px color-mix(in srgb,var(--brand-text) 55%,#000)}
+[data-lawyers-grid] .lc-head{display:flex;align-items:flex-start;gap:11px}
+[data-lawyers-grid] .lc-av{width:52px;height:52px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:17px;font-weight:700;color:var(--teal-ink);background:radial-gradient(120% 100% at 100% 0%,color-mix(in srgb,var(--teal-ink) 24%,transparent),transparent 60%),color-mix(in srgb,var(--teal-ink) 13%,var(--surface-2));transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+[data-lawyers-grid] .lc-card:hover .lc-av{transform:scale(1.08)}
+[data-lawyers-grid] .lc-name-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+[data-lawyers-grid] .lc-name{font-size:15px;font-weight:700;color:var(--ink);line-height:1.25}
+[data-lawyers-grid] .lc-verified{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:700;color:var(--brand-text)}
+[data-lawyers-grid] .lc-bar{margin-top:3px;font:500 11px "JetBrains Mono",monospace;color:var(--faint)}
+[data-lawyers-grid] .lc-avail{flex:none;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 13%,transparent)}
+[data-lawyers-grid] .lc-avail[data-off]{color:var(--faint);background:var(--chip-n)}
+[data-lawyers-grid] .lc-chips{display:flex;gap:6px;flex-wrap:wrap}
+[data-lawyers-grid] .lc-chips span{font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip-n);color:var(--ink)}
+[data-lawyers-grid] .lc-rating{font-size:12.5px;font-weight:600;color:var(--gold)}
+[data-lawyers-grid] .lc-rating[data-none]{font-weight:500;color:var(--faint)}
+[data-lawyers-grid] .lc-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+[data-lawyers-grid] .lc-facts div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-right:1px solid var(--line);min-width:0}
+[data-lawyers-grid] .lc-facts div:last-child{border-right:0}
+[data-lawyers-grid] .lc-facts b{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-lawyers-grid] .lc-facts span{font-size:10.5px;color:var(--faint)}
+[data-lawyers-grid] .lc-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto}
+[data-lawyers-grid] .lc-book{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border:0;border-radius:999px;background:var(--brand-solid);color:var(--on-brand);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 8px 18px -10px rgba(46,196,214,.7);transition:filter .15s}
+[data-lawyers-grid] .lc-book:hover:not(:disabled){filter:brightness(1.08)}
+[data-lawyers-grid] .lc-book:hover:not(:disabled) svg{animation:lcHop .5s ease}
+[data-lawyers-grid] .lc-book:disabled{background:var(--chip-n);color:var(--faint);box-shadow:none;cursor:not-allowed}
+[data-lawyers-grid] .lc-view{display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 4px;border:0;background:none;color:var(--brand-text);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+[data-lawyers-grid] .lc-view svg{transition:transform .2s}
+[data-lawyers-grid] .lc-view:hover svg{transform:translateX(3px)}
+@keyframes lcHop{0%,100%{transform:none}40%{transform:translateY(-3px)}}
+@media (prefers-reduced-motion:reduce){[data-lawyers-grid] .lc-card,[data-lawyers-grid] .lc-av{transition:none}[data-lawyers-grid] .lc-card:hover{transform:none}}`;
+
+/* The directory hero (2026-10-10), scoped by [data-lawyers-hero]. */
+const LAWYERS_HERO_CSS = `[data-lawyers-hero]{margin-bottom:22px;border-radius:22px;border:1px solid var(--line);background:radial-gradient(70% 120% at 100% 0%,color-mix(in srgb,var(--brand-text) 10%,transparent) 0%,transparent 60%),var(--surface);box-shadow:var(--shadow-rest);overflow:hidden}
+[data-lawyers-hero] .lh-main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:22px;padding:24px 26px}
+[data-lawyers-hero] .lh-tag{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--brand-text)}
+[data-lawyers-hero] .lh-tag i{width:7px;height:7px;border-radius:50%;background:var(--brand-text);box-shadow:0 0 8px var(--brand-text)}
+[data-lawyers-hero] .lh-title{margin:10px 0 0;font-size:24px;font-weight:700;color:var(--ink);letter-spacing:-.2px}
+[data-lawyers-hero] .lh-text{margin:6px 0 16px;font-size:14px;color:var(--muted)}
+[data-lawyers-hero] .lh-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+[data-lawyers-hero] .lh-stat{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"ic v" "l l" "s s";align-items:center;column-gap:10px;padding:12px 14px;border-radius:16px;text-align:left;cursor:pointer;font:inherit;color:inherit;border:1px solid color-mix(in srgb,var(--c) 18%,var(--line));background:radial-gradient(120% 100% at 100% 0%,color-mix(in srgb,var(--c) 13%,transparent) 0%,transparent 55%),var(--surface-2);transition:transform .2s ease,border-color .2s,box-shadow .2s}
+[data-lawyers-hero] .lh-stat:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--c) 50%,var(--line));box-shadow:0 14px 26px -18px color-mix(in srgb,var(--c) 70%,#000)}
+[data-lawyers-hero] .lh-stat .ic{grid-area:ic;width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+[data-lawyers-hero] .lh-stat .v{grid-area:v;font:600 28px/1 "Literata",Georgia,serif;color:var(--ink);text-align:right}
+[data-lawyers-hero] .lh-stat .l{grid-area:l;margin-top:10px;font-size:13px;font-weight:600;color:var(--ink)}
+[data-lawyers-hero] .lh-stat .s{grid-area:s;font-size:11.5px;color:var(--faint);margin-top:2px}
+[data-lawyers-hero] .lh-ai{display:flex;flex-direction:column;gap:10px;padding:20px 22px;border-radius:18px;border:1px solid color-mix(in srgb,var(--brand-text) 30%,transparent);background:radial-gradient(120% 120% at 100% 0%,color-mix(in srgb,var(--brand-text) 16%,transparent) 0%,transparent 55%),linear-gradient(180deg,var(--hover),var(--surface))}
+[data-lawyers-hero] .lh-ai-tag{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--brand-text)}
+[data-lawyers-hero] .lh-ai-tag span{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:color-mix(in srgb,var(--brand-text) 16%,transparent)}
+[data-lawyers-hero] .lh-ai-title{margin:0;font-size:20px;font-weight:700;color:var(--ink)}
+[data-lawyers-hero] .lh-ai-text{margin:0;font-size:13.5px;line-height:1.55;color:var(--muted)}
+[data-lawyers-hero] .lh-ai-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px}
+[data-lawyers-hero] .lh-ai-btn{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 18px;border:0;border-radius:999px;background:var(--brand-solid);color:var(--on-brand);font:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 10px 22px -12px rgba(46,196,214,.8);transition:filter .15s,transform .15s}
+[data-lawyers-hero] .lh-ai-btn:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px)}
+[data-lawyers-hero] .lh-ai-btn:hover:not(:disabled) svg{animation:lhTwinkle .6s ease}
+[data-lawyers-hero] .lh-ai-btn:disabled{opacity:.7;cursor:wait}
+[data-lawyers-hero] .lh-ai-note{font-size:12px;color:var(--faint)}
+[data-lawyers-hero] .lh-running{display:flex;align-items:center;gap:12px;margin:0 26px 14px;padding:10px 14px;border-radius:14px;font-size:13.5px;color:var(--ink);background:color-mix(in srgb,var(--teal-ink) 10%,var(--surface-2));border:1px solid color-mix(in srgb,var(--teal-ink) 28%,transparent)}
+[data-lawyers-hero] .lh-running .dot{width:8px;height:8px;flex:none;border-radius:50%;background:var(--teal-ink)}
+[data-lawyers-hero] .lh-running[data-due]{background:color-mix(in srgb,var(--gold) 12%,var(--surface-2));border-color:color-mix(in srgb,var(--gold) 40%,transparent)}
+[data-lawyers-hero] .lh-running[data-due] .dot{background:var(--gold);box-shadow:0 0 8px var(--gold)}
+[data-lawyers-hero] .lh-running button{flex:none;height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+[data-lawyers-hero] .lh-running button:hover{background:var(--hover-tint);color:var(--hover-ink)}
+[data-lawyers-hero] .lh-trust{display:flex;flex-wrap:wrap;gap:8px 22px;padding:12px 26px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--surface-2) 55%,transparent);font-size:12.5px;color:var(--muted)}
+[data-lawyers-hero] .lh-trust span{display:inline-flex;align-items:center;gap:6px}
+[data-lawyers-hero] .lh-trust svg{color:var(--brand-text)}
+@keyframes lhTwinkle{0%,100%{transform:none}50%{transform:scale(1.25) rotate(20deg)}}`;
+
+/* The Filters panel's look (2026-10-10), scoped by [data-lawyers-panel]. */
+const LAWYERS_PANEL_CSS = `[data-lawyers-panel]{position:relative;margin:0 0 20px;border-radius:20px;border:1px solid color-mix(in srgb,var(--brand-text) 22%,var(--line));background:radial-gradient(60% 120% at 100% 0%,color-mix(in srgb,var(--brand-text) 9%,transparent) 0%,transparent 60%),var(--surface);box-shadow:0 22px 44px -28px rgba(0,0,0,.75);overflow:hidden;animation:lpIn .22s ease}
+[data-lawyers-panel] .lp-head{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--line)}
+[data-lawyers-panel] .lp-ic{width:36px;height:36px;flex:none;border-radius:11px;display:grid;place-items:center;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-lawyers-panel] .lp-title{margin:0;font-size:15.5px;font-weight:700;color:var(--ink)}
+[data-lawyers-panel] .lp-sub{font-size:12.5px;color:var(--faint);margin-top:1px}
+[data-lawyers-panel] .lp-x{margin-left:auto;width:34px;height:34px;border-radius:10px;border:1px solid var(--line-strong);background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+[data-lawyers-panel] .lp-x:hover{border-color:transparent;color:var(--danger);background:var(--danger-soft)}
+[data-lawyers-panel] .lp-x svg{transition:transform .25s ease}
+[data-lawyers-panel] .lp-x:hover svg{transform:rotate(90deg)}
+[data-lawyers-panel] .lp-body{display:grid;grid-template-columns:1fr 1fr;gap:22px 26px;padding:20px 22px 22px}
+[data-lawyers-panel] .lp-label{display:flex;align-items:center;gap:7px;margin-bottom:10px;font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+[data-lawyers-panel] .lp-label svg{color:var(--brand-text)}
+[data-lawyers-panel] .lp-label .gold{color:var(--gold)}
+[data-lawyers-panel] .lp-select{position:relative}
+[data-lawyers-panel] .lp-select select{width:100%;height:44px;padding:0 40px 0 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--input);color:var(--ink);font:inherit;font-size:13.5px;font-weight:500;appearance:none;outline:none;cursor:pointer;transition:border-color .15s,box-shadow .15s,background .15s}
+[data-lawyers-panel] .lp-select select:hover{background:color-mix(in srgb,var(--brand-text) 6%,var(--input))}
+[data-lawyers-panel] .lp-select:hover .chev{transform:translateY(calc(-50% + 2px))}
+[data-lawyers-panel] .lp-select select:focus{border-color:var(--brand-text);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 22%,transparent)}
+[data-lawyers-panel] .lp-select[data-on] select{border-color:color-mix(in srgb,var(--brand-text) 60%,transparent);background:color-mix(in srgb,var(--brand-text) 9%,var(--input));font-weight:700}
+[data-lawyers-panel] .lp-select select option{background:var(--surface);color:var(--ink)}
+[data-lawyers-panel] .lp-select .chev{position:absolute;right:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--faint);transition:color .15s,transform .2s}
+[data-lawyers-panel] .lp-select:hover .chev,[data-lawyers-panel] .lp-select[data-on] .chev{color:var(--brand-text)}
+[data-lawyers-panel] .lp-chips{display:flex;gap:8px;flex-wrap:wrap}
+[data-lawyers-panel] .lp-chip{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s,transform .12s}
+[data-lawyers-panel] .lp-chip:hover{background:var(--hover-tint);color:var(--ink)}
+[data-lawyers-panel] .lp-chip.star:hover{background:color-mix(in srgb,var(--gold) 10%,transparent)}
+[data-lawyers-panel] .lp-chip.star:hover svg{color:var(--gold);transform:rotate(-14deg) scale(1.15)}
+[data-lawyers-panel] .lp-chip:hover .dot{transform:scale(1.4)}
+[data-lawyers-panel] .lp-chip .dot{transition:transform .2s cubic-bezier(.3,1.4,.5,1)}
+[data-lawyers-panel] .lp-chip:active{transform:scale(.96)}
+[data-lawyers-panel] .lp-chip svg{color:var(--faint);transition:color .15s,transform .25s cubic-bezier(.3,1.4,.5,1)}
+[data-lawyers-panel] .lp-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--c)}
+[data-lawyers-panel] .lp-chip[aria-checked="true"]{border-color:color-mix(in srgb,var(--brand-text) 55%,transparent);background:color-mix(in srgb,var(--brand-text) 14%,var(--surface-2));color:var(--ink);font-weight:700}
+[data-lawyers-panel] .lp-chip.star[aria-checked="true"]{border-color:color-mix(in srgb,var(--gold) 60%,transparent);background:color-mix(in srgb,var(--gold) 14%,var(--surface-2))}
+[data-lawyers-panel] .lp-chip.star[aria-checked="true"] svg{color:var(--gold);fill:var(--gold)}
+[data-lawyers-panel] .lp-foot{display:flex;align-items:center;gap:12px;padding:14px 22px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--surface-2) 60%,transparent)}
+[data-lawyers-panel] .lp-count{font-size:13px;color:var(--muted)}
+[data-lawyers-panel] .lp-count b{color:var(--brand-text);font-weight:800}
+[data-lawyers-panel] .lp-reset{margin-left:auto;display:inline-flex;align-items:center;gap:7px;height:40px;padding:0 16px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+[data-lawyers-panel] .lp-reset:hover{color:var(--hover-ink);background:var(--hover-tint)}
+[data-lawyers-panel] .lp-reset:hover svg{transform:rotate(-200deg)}
+[data-lawyers-panel] .lp-reset svg{transition:transform .45s ease}
+[data-lawyers-panel] .lp-show{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 20px;border-radius:999px;border:0;background:linear-gradient(135deg,#12897f 0%,#1c9c66 100%);color:#fff;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(28,156,102,.3);transition:filter .15s,box-shadow .15s,transform .15s}
+[data-lawyers-panel] .lp-show:hover{filter:brightness(1.08);box-shadow:0 8px 20px rgba(28,156,102,.4);transform:translateY(-1px)}
+[data-lawyers-panel] .lp-show:hover svg{transform:translateX(3px)}
+[data-lawyers-panel] .lp-show svg{transition:transform .2s}
+@keyframes lpIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}`;
+
+/* The AI box as a message box (2026-10-10), scoped by [data-ai-ask]. */
+const AI_ASK_CSS = `[data-ai-ask]{display:flex;flex-direction:column;gap:10px;margin-bottom:20px;padding:16px;border-radius:16px;border:1.5px dashed color-mix(in srgb,var(--brand-text) 40%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--brand-text) 16%,transparent),transparent);transition:border-color .2s}
+[data-ai-ask][data-open]{border-color:color-mix(in srgb,var(--brand-text) 70%,transparent)}
+[data-ai-ask] .aa-row{display:flex;align-items:center;gap:14px}
+[data-ai-ask] .aa-ic{width:42px;height:42px;flex:none;border-radius:13px;display:grid;place-items:center;background:color-mix(in srgb,var(--brand-text) 18%,transparent)}
+[data-ai-ask] .aa-field{flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:46px;padding:0 16px;border-radius:999px;border:1px solid var(--brand-text);background:color-mix(in srgb,var(--bg) 70%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 18%,transparent);animation:aaIn .22s ease}
+[data-ai-ask] .aa-field input{flex:1;min-width:0;height:40px;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:14px}
+[data-ai-ask] .aa-field input::placeholder{color:var(--faint)}
+[data-ai-ask] .aa-hint{flex:none;font-size:11.5px;color:var(--faint)}
+[data-ai-ask] .aa-send{display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 16px;border:0;border-radius:999px;flex:none;background:var(--brand-solid);color:var(--on-brand);font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:filter .15s,transform .15s}
+[data-ai-ask] .aa-send:hover:not(:disabled){filter:brightness(1.08)}
+[data-ai-ask] .aa-send:hover:not(:disabled) svg{transform:translate(2px,-2px)}
+[data-ai-ask] .aa-send svg{transition:transform .2s}
+[data-ai-ask] .aa-send:disabled{opacity:.55;cursor:not-allowed}
+[data-ai-ask] .aa-x{width:32px;height:32px;flex:none;border-radius:9px;border:1px solid var(--line-strong);background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer}
+[data-ai-ask] .aa-x:hover{border-color:transparent;color:var(--danger);background:var(--danger-soft)}
+[data-ai-ask] .aa-x svg{transition:transform .25s ease}
+[data-ai-ask] .aa-x:hover svg{transform:rotate(90deg)}
+[data-ai-ask] .aa-out{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding-left:56px;font-size:13px;color:var(--muted);animation:aaIn .22s ease}
+[data-ai-ask] .aa-tag{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;font-weight:700;font-size:12.5px;color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-ai-ask] .aa-link{border:0;background:none;padding:4px 6px;border-radius:8px;color:var(--brand-text);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+[data-ai-ask] .aa-link:hover{background:var(--hover-tint)}
+@keyframes aaIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}`;
+
+/* The page's Map button (2026-10-10), scoped by [data-map-open]. The map
+ * folds open and the pin drops on hover; on click it pops before the map. */
+const MAP_OPEN_CSS = `[data-map-open]{position:relative;display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 16px 0 7px;border-radius:999px;border:1px solid color-mix(in srgb,var(--brand-text) 35%,var(--line));background:radial-gradient(120% 140% at 0% 0%,color-mix(in srgb,var(--brand-text) 16%,transparent) 0%,transparent 60%),var(--surface);color:var(--ink);font:inherit;font-size:14px;font-weight:700;cursor:pointer;overflow:hidden;transition:border-color .2s,box-shadow .2s,transform .15s,padding .3s ease,gap .3s ease,color .25s}
+[data-map-open]:hover,[data-map-open]:focus-visible,[data-map-open][data-going]{padding:0 18px 0 8px;gap:10px}
+[data-map-open]:hover{border-color:color-mix(in srgb,var(--brand-text) 70%,transparent);box-shadow:0 10px 24px -14px color-mix(in srgb,var(--brand-text) 80%,#000)}
+[data-map-open]:active{transform:scale(.97)}
+[data-map-open]::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(135deg,#12897f 0%,#1c9c66 100%);opacity:0;transition:opacity .3s ease}
+[data-map-open]>*{position:relative}
+[data-map-open]:hover::before,[data-map-open]:focus-visible::before,[data-map-open][data-going]::before{opacity:1}
+[data-map-open]:hover,[data-map-open]:focus-visible,[data-map-open][data-going]{color:#fff;border-color:transparent}
+[data-map-open]:hover .mo-ic,[data-map-open]:focus-visible .mo-ic,[data-map-open][data-going] .mo-ic{background:#fff;color:#12897f}
+[data-map-open]:hover .mo-sub,[data-map-open]:focus-visible .mo-sub,[data-map-open][data-going] .mo-sub{color:rgba(255,255,255,.8)}
+[data-map-open]:hover .mo-arrow,[data-map-open]:focus-visible .mo-arrow,[data-map-open][data-going] .mo-arrow{color:#fff}
+[data-map-open] .mo-ic{position:relative;width:32px;height:32px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--on-brand);background:var(--brand-solid);transition:background .25s,color .25s}
+[data-map-open] .mo-pin{transform-box:fill-box;transform-origin:50% 100%}
+[data-map-open] .mo-shadow{transform-box:fill-box;transform-origin:50% 50%}
+[data-map-open]:hover .mo-pin{animation:moDrop .7s cubic-bezier(.3,1.4,.5,1)}
+[data-map-open]:hover .mo-shadow{animation:moShadow .7s ease}
+[data-map-open] .mo-ic::after{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid var(--brand-text);opacity:0}
+[data-map-open][data-going] .mo-ic::after{animation:moRing .45s ease-out}
+[data-map-open][data-going] .mo-ic svg{animation:moSpin .45s ease}
+[data-map-open] .mo-sub{display:block;max-width:0;max-height:0;overflow:hidden;white-space:nowrap;opacity:0;font-size:12px;font-weight:500;color:var(--faint);transition:max-width .35s ease,max-height .3s ease,opacity .25s ease,color .25s}
+[data-map-open]:hover .mo-sub,[data-map-open]:focus-visible .mo-sub,[data-map-open][data-going] .mo-sub{max-width:180px;max-height:16px;opacity:1}
+[data-map-open] .mo-arrow{flex:none;color:var(--brand-text);transition:transform .2s,color .25s}
+[data-map-open]:hover .mo-arrow{transform:translateX(3px)}
+@keyframes moDrop{0%{transform:translateY(-7px);opacity:.4}55%{transform:translateY(0) scale(1.08,.9)}75%{transform:translateY(-2px)}100%{transform:none;opacity:1}}
+@keyframes moShadow{0%{transform:scale(.4);opacity:.1}55%{transform:scale(1.15)}100%{transform:none}}
+@keyframes moRing{from{opacity:.9;transform:scale(1)}to{opacity:0;transform:scale(1.8)}}
+@keyframes moSpin{0%{transform:none}50%{transform:scale(.8) rotate(-12deg)}100%{transform:scale(1.1)}}
+@media (prefers-reduced-motion:reduce){[data-map-open] *{animation:none!important;transition:none!important}}`;
 
 const ModLawyers = () => {
     const t = useT();
@@ -112,6 +479,13 @@ const ModLawyers = () => {
     const [loadingLawyers, setLoadingLawyers] = useState(true);
     const [aiMatch, setAiMatch] = useState(null);
     const [loadingMatch, setLoadingMatch] = useState(false);
+    // The AI box as a message box (2026-10-10): the client describes the
+    // problem and the list is filtered from it. `askResult` is what was read.
+    const [askOpen, setAskOpen] = useState(false);
+    const [askText, setAskText] = useState("");
+    const [askResult, setAskResult] = useState(null);
+    const askRef = useRef(null);
+    const [mapGoing, setMapGoing] = useState(false);
     // A general listing is NOT a match. The API says which it returned via
     // result_kind; these two carry that answer so the banner can render a
     // browse list differently instead of dressing it up as a recommendation.
@@ -308,10 +682,8 @@ const ModLawyers = () => {
                 const prov = CITY_TO_PROVINCE[filters.city.toLowerCase()];
                 if (prov) params.province = prov;
             }
-            if (filters.specialization !== "All") {
-                const ct = SPEC_TO_CASE_TYPE[filters.specialization.toLowerCase()];
-                if (ct) params.case_type = ct;
-            }
+            // An area chip or Filters → Specialization: the area the lawyer lists.
+            if (filters.specialization !== "All") params.specialization = filters.specialization;
             if (filters.rating > 0) params.min_rating = filters.rating;
             if (filters.availability === "Available") params.availability = true;
             else if (filters.availability === "Busy") params.availability = false;
@@ -575,13 +947,74 @@ const ModLawyers = () => {
     // those the current page happens to contain, and choosing one could never
     // reveal anyone outside it. They are closed sets on the server (CaseType and
     // Province), so they are closed sets here.
-    const specializations = ["All", "Criminal", "Civil", "Family", "Constitutional"];
     const cities = ["All", "Punjab", "Sindh", "KPK", "Balochistan", "Federal"];
     // No "Distance: Nearest". Nothing in the product collects the client's
     // location, so there is no distance to sort by — the option compared
     // `null - null` for every pair, silently returned the list untouched, and
     // presented that as a proximity ranking.
     const sortOptions = ["Rating: High to Low", "Rating: Low to High", "Price: Low to High", "Price: High to Low", "Experience: High", "A–Z", "Z–A"];
+    // The map view (2026-10-10): the lawyer chosen on the list or the map, and
+    // the list row under the pointer (its pin lights up).
+    const [mapPick, setMapPick] = useState(null);
+    const [mapHover, setMapHover] = useState(null);
+    const [mapPanelOpen, setMapPanelOpen] = useState(true);    // the floating list over the map
+    const [mapLayout, setMapLayout] = useState("list");        // its rows, or a 2-column grid
+    // The client's position, only after they press "My location" on the map.
+    // Kept in this page's memory -- never stored, never sent to the server.
+    const [myPos, setMyPos] = useState(null);
+    // The toolbar: "/" jumps to the search (not while typing elsewhere), and
+    // Filters shows how many of its choices are on.
+    const searchRef = useRef(null);
+    useEffect(() => {
+        const onKey = e => {
+            if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+            const el = e.target;
+            if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+            e.preventDefault();
+            searchRef.current?.focus();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, []);
+    // Each area chip's count is the server's total for that area under the
+    // other filters (one 1-row read each): the page holds only 20 rows, so
+    // counting the rows on screen would be wrong.
+    const [areaCounts, setAreaCounts] = useState({});
+    useEffect(() => {
+        // After the list itself has loaded once: it is the first read, and a
+        // server that is down gets no further calls.
+        if (!backendUp) return undefined;
+        let live = true;
+        const base = { page: 1, page_size: 1 };
+        if (filters.city !== "All") {
+            const prov = CITY_TO_PROVINCE[filters.city.toLowerCase()];
+            if (prov) base.province = prov;
+        }
+        if (filters.rating > 0) base.min_rating = filters.rating;
+        if (filters.availability === "Available") base.availability = true;
+        else if (filters.availability === "Busy") base.availability = false;
+        const ask = extra => Promise.resolve(searchLawyers({ ...base, ...extra }))
+            .then(res => (res && !res.error ? (res.data?.total ?? null) : null)).catch(() => null);
+        Promise.all(AREA_CHIPS.map(([, area]) => ask({ specialization: area }))).then(each => {
+            if (!live) return;
+            const next = {};
+            AREA_CHIPS.forEach(([, value], i) => { next[value] = each[i]; });
+            setAreaCounts(next);
+        });
+        return () => { live = false; };
+    }, [backendUp, filters.city, filters.rating, filters.availability]);
+    const [dirTotals, setDirTotals] = useState({ all: null, accepting: null });
+    useEffect(() => {
+        if (!backendUp) return undefined;
+        let live = true;
+        const total = extra => Promise.resolve(searchLawyers({ page: 1, page_size: 1, ...extra }))
+            .then(res => (res && !res.error ? (res.data?.total ?? null) : null)).catch(() => null);
+        Promise.all([total({}), total({ availability: true })]).then(([all, accepting]) => {
+            if (live) setDirTotals({ all, accepting });
+        });
+        return () => { live = false; };
+    }, [backendUp]);
+    const activeFilterCount = (filters.specialization !== "All" ? 1 : 0) + (filters.city !== "All" ? 1 : 0) + (filters.rating > 0 ? 1 : 0);
 
     // Shown wherever the backend genuinely has no value for a field. Saying so
     // is the honest option; the alternative is inventing one, which is how a
@@ -1266,7 +1699,7 @@ const ModLawyers = () => {
                                 confirm enrolment with any Bar Council — no such check
                                 exists in the system. Saying so here is the difference
                                 between a listing and a guarantee. */}
-                            <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.5, marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: t.border + "40" }}>
+                            <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.5, marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: `color-mix(in srgb, ${t.border} 25%, transparent)` }}>
                                 Credentials below are provided by the lawyer and reviewed by our team.
                                 We do not independently confirm Bar Council enrolment — please verify
                                 directly before engaging.
@@ -1294,7 +1727,7 @@ const ModLawyers = () => {
                         <Card style={{ padding: 0, overflow: "hidden" }}>
                             {/* Real embedded map centred on this lawyer */}
                             <LeafletMap
-                                lawyers={profileMapLawyers}
+                                lawyers={profileMapLawyers} dark={t.mode === "dark"}
                                 height={200}
                                 onSelect={() => { }}
                             />
@@ -1440,66 +1873,164 @@ const ModLawyers = () => {
     }
 
     // ── MAP VIEW ──────────────────────────────────────────────────
+    // (2026-10-10) The map fills the view; the list floats over its left edge
+    // and folds away. Fee pills for pins, the chosen lawyer's card over the
+    // map. Pins show a PROVINCE where the lawyer gave no address -- the panel
+    // says so, and those pins are dashed.
     if (activeView === "map") {
+        const idOf = l => String(l._id || l.bar || l.name);
+        const picked = filtered.find(l => idOf(l) === mapPick) || null;
+        const initials = l => l.name.split(" ").map(w => w[0]).join("").slice(0, 2);
+        const feeText = l => (l.fee ? `Rs ${l.fee.toLocaleString()}` : "Fee on request");
+        const ratingText = l => (l.reviews > 0 ? `★ ${Number(l.rating).toFixed(1)} (${l.reviews})` : "No reviews yet");
+        const panelIcon = (
+            <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
+        );
+        const grid = mapLayout === "grid";
+        // Distance is shown only to a lawyer whose pin is their OFFICE (an
+        // address they gave): a province centre is not a place to measure to.
+        const exact = l => l.precision === "exact" && l.lat != null && l.lng != null;
+        const kmTo = l => {
+            if (!myPos || !exact(l)) return null;
+            const rad = d => (d * Math.PI) / 180;
+            const dLat = rad(l.lat - myPos.lat), dLng = rad(l.lng - myPos.lng);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(myPos.lat)) * Math.cos(rad(l.lat)) * Math.sin(dLng / 2) ** 2;
+            return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
+        const kmText = km => (km == null ? null : km < 1 ? `${Math.round(km * 1000)} m away` : `${km < 10 ? km.toFixed(1) : Math.round(km)} km away`);
+        // Located: the nearest offices first, then everyone without one, in the server's order.
+        const shown = !myPos ? filtered : [...filtered].sort((a, b) => {
+            const da = kmTo(a), db = kmTo(b);
+            if (da == null && db == null) return 0;
+            if (da == null) return 1;
+            if (db == null) return -1;
+            return da - db;
+        });
+        const directionsUrl = l => `https://www.google.com/maps/dir/?api=1&destination=${l.lat},${l.lng}`
+            + (myPos ? `&origin=${myPos.lat},${myPos.lng}` : "");
         return (
-            <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-                    <button onClick={() => setActiveView("list")} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: t.primary, cursor: "pointer", fontSize: 13, fontWeight: 600, padding: 0 }}>
-                        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={t.primary} strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
-                        Back to List
-                    </button>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Lawyers Near You</span>
+            <div data-lawyers-map-page>
+            <style>{LAWYERS_TOOLS_CSS + "\n" + LAWYERS_MAP_CSS}</style>
+            {/* The page's header, above the map (2026-10-10). */}
+            <header className="lm-pagehead">
+                <button type="button" className="lm-back" onClick={() => setActiveView("list")} aria-label="Back to list" title="Back to list">
+                    <span className="ic" aria-hidden="true">
+                        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
+                    </span>
+                    List
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h2 className="lm-title">All lawyers</h2>
+                    <div className="lm-sub">{filtered.length} lawyer{filtered.length === 1 ? "" : "s"} · {myPos ? "nearest office first" : "pins show province"}</div>
                 </div>
-                {/* The location input and its "Find Nearby" button are gone.
-                    Nothing in the product geocodes the client, and the button
-                    carried no onClick at all — typing an address and pressing it
-                    did nothing, while the screen still promised proximity
-                    search. The pins below are province-centre approximations,
-                    which the notice says plainly rather than implying a
-                    surveyed office location. */}
-                <Card style={{ marginBottom: 16 }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                        <Ic n="map" s={15} c={t.textMuted} />
-                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6 }}>
-                            Pins show each lawyer&apos;s <strong style={{ color: t.text }}>province</strong>, not their
-                            office address. Distances are not calculated. Open a
-                            profile for the address the lawyer has provided.
+                <button type="button" className="lm-toggle" aria-pressed={mapPanelOpen} onClick={() => setMapPanelOpen(o => !o)}>
+                    <span className="ic" aria-hidden="true">{panelIcon}</span>
+                    {mapPanelOpen ? "Hide list" : "Show list"}
+                    {!mapPanelOpen && <span className="n">{filtered.length}</span>}
+                </button>
+            </header>
+            <div data-lawyers-map style={{ position: "relative", height: "calc(100vh - 140px)", minHeight: 520, borderRadius: 20, overflow: "hidden", border: "1px solid var(--line)", boxShadow: "var(--shadow)" }}>
+                {/* Book from the map: the same dialogs as the list (portals). */}
+                {showApptModal && renderAppointmentModal()}
+                {showHireModal && renderHireModal()}
+
+                <LeafletMap lawyers={filtered} height="100%" dark={t.mode === "dark"} controls
+                    selectedId={mapPick} hoveredId={mapHover} leftInset={mapPanelOpen ? 340 : 0}
+                    onSelect={l => setMapPick(idOf(l))}
+                    onLocate={(pos, problem) => {
+                        if (pos) { setMyPos(pos); toast.show("Showing lawyers nearest to you first.", "success", 2500); }
+                        else toast.show(problem || "Your location could not be found.", "error", 3500);
+                    }} />
+
+                <aside aria-label="Lawyers on the map" className="lm-panel" data-closed={mapPanelOpen ? undefined : "true"} aria-hidden={!mapPanelOpen}>
+                    <div data-lawyers-tools className="lm-tools">
+                        <label className="lm-search">
+                            <Ic n="search" s={15} c="var(--faint)" />
+                            <span style={{ position: "absolute", left: -9999 }}>Search lawyers</span>
+                            <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search lawyers…" tabIndex={mapPanelOpen ? 0 : -1} />
+                        </label>
+                        <div role="group" aria-label="Layout" className="lm-seg">
+                            <button type="button" aria-pressed={!grid} aria-label="List" title="List" onClick={() => setMapLayout("list")}>
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
+                            </button>
+                            <button type="button" aria-pressed={grid} aria-label="Grid" title="Grid" onClick={() => setMapLayout("grid")}>
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" /></svg>
+                            </button>
+                        </div>
+                        <LawyerSort compact value={sortBy} options={sortOptions} onChange={setSortBy} />
+                    </div>
+                    <div className="lm-list" data-grid={grid ? "true" : undefined} data-lenis-prevent>
+                        {shown.map(l => {
+                            const id = idOf(l);
+                            const away = kmText(kmTo(l));
+                            return (
+                                <div key={id} role="button" tabIndex={mapPanelOpen ? 0 : -1} className="lm-card" data-on={id === mapPick ? "true" : undefined}
+                                    onClick={() => setMapPick(id)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMapPick(id); } }}
+                                    onMouseEnter={() => setMapHover(id)} onMouseLeave={() => setMapHover(h => (h === id ? null : h))}>
+                                    <span className="lm-av" aria-hidden="true">{initials(l)}</span>
+                                    <div className="lm-body">
+                                        <div className="lm-name">{l.name}</div>
+                                        <div className="lm-meta">
+                                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
+                                            {away ? <b className="lm-km">{away}</b> : null}{away ? " · " : ""}{l.city}{l.lat == null ? " · no map location" : ""}
+                                        </div>
+                                        {!grid && <div className="lm-meta"><span className="lm-rate" data-none={l.reviews > 0 ? undefined : "true"}>{ratingText(l)}</span> · {l.spec}</div>}
+                                        <div className="lm-foot">
+                                            <span><b>{feeText(l)}</b>{l.fee && !grid ? " / consultation" : ""}</span>
+                                            {!grid && <span className="lm-tag" data-off={l.avail ? undefined : "true"}>{l.avail ? "Accepting" : "Not accepting"}</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {filtered.length === 0 && <div className="lm-sub" style={{ padding: 16 }}>No lawyer matches these filters.</div>}
+                    </div>
+                </aside>
+
+                {picked && (
+                    <div className="lm-pop" role="dialog" aria-label={`${picked.name}, on the map`}>
+                        <div className="lm-pop-band">
+                            <span className="lm-pop-av" aria-hidden="true">{initials(picked)}</span>
+                            <button type="button" className="lm-close" aria-label="Close" onClick={() => setMapPick(null)}>
+                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                            </button>
+                        </div>
+                        <div style={{ padding: "14px 16px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+                                <div className="lm-name" style={{ fontSize: 16.5 }}>{picked.name}</div>
+                                <span className="lm-rate" data-none={picked.reviews > 0 ? undefined : "true"} style={{ whiteSpace: "nowrap" }}>{ratingText(picked)}</span>
+                            </div>
+                            <div className="lm-sub" style={{ fontSize: 13.5 }}>{picked.spec} · {picked.city}</div>
+                            <div className="lm-facts">
+                                <div><b>{picked.exp ? `${picked.exp} yrs` : "New"}</b><span>experience</span></div>
+                                <div><b>{feeText(picked)}</b><span>consultation</span></div>
+                                <div><b>{picked.avail ? "Accepting" : "Not now"}</b><span>requests</span></div>
+                            </div>
+                            {exact(picked) ? (
+                                <div className="lm-addr">
+                                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
+                                    <span>{picked.address || "Office location on the map"}{kmText(kmTo(picked)) ? <b> · {kmText(kmTo(picked))}</b> : null}</span>
+                                </div>
+                            ) : (
+                                <div className="lm-sub" style={{ fontSize: 12 }}>Office address not shared — the pin is the province centre, so there is no route to it.</div>
+                            )}
+                            <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                                <button type="button" className="lm-btn ghost" onClick={() => { setSelectedLawyer(picked); setActiveView("profile"); }}>View profile</button>
+                                {exact(picked) && (
+                                    <a className="lm-btn ghost" href={directionsUrl(picked)} target="_blank" rel="noopener noreferrer"
+                                        title={myPos ? "Route from your location, in Google Maps" : "Route to the office, in Google Maps"}>
+                                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8z" /></svg>
+                                        Directions
+                                    </a>
+                                )}
+                            </div>
+                            <button type="button" className="lm-btn" style={{ flex: "none", width: "100%" }} disabled={!picked.avail}
+                                title={picked.avail ? undefined : "This lawyer is not taking new requests"}
+                                onClick={() => picked.avail && openBooking(picked)}>Book consultation</button>
                         </div>
                     </div>
-                </Card>
-                <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
-                    <LeafletMap
-                        lawyers={filtered}
-                        height={340}
-                        onSelect={l => { setSelectedLawyer(l); setActiveView("profile"); }}
-                    />
-                </Card>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {filtered.map((l) => {
-                        const ac = getAccent(l);
-                        return (
-                            <Card key={l._id || l.bar} style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", transition: "all 0.2s" }}
-                                onMouseEnter={e => e.currentTarget.style.boxShadow = t.shadowHover}
-                                onMouseLeave={e => e.currentTarget.style.boxShadow = t.shadowCard}
-                                onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}>
-                                <div style={{ width: 44, height: 44, borderRadius: 14, background: ac.light, border: `2px solid ${ac.solid}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: ac.solid, flexShrink: 0 }}>
-                                    {l.name.split(" ").map(w => w[0]).join("").slice(0, 2)}
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 700, color: t.text, fontSize: 13 }}>{l.name}</div>
-                                    <div style={{ fontSize: 12, color: t.textMuted }}>{l.spec} · {l.city}</div>
-                                </div>
-                                <div style={{ textAlign: "right" }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{l.city}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>province</div>
-                                </div>
-                                {/* Labelled for what it does. It was "Directions" and opened the
-                                    profile — it has never navigated anywhere. */}
-                                <BtnOutline style={{ fontSize: 12, padding: "7px 14px", flexShrink: 0 }} onClick={e => { e.stopPropagation(); setSelectedLawyer(l); setActiveView("profile"); }}>View Profile</BtnOutline>
-                            </Card>
-                        );
-                    })}
-                </div>
+                )}
+            </div>
             </div>
         );
     }
@@ -1556,188 +2087,293 @@ const ModLawyers = () => {
             {showApptModal && renderAppointmentModal()}
             {showHireModal && renderHireModal()}
 
-            {/* ── Directory Banner ─────────────────────────── */}
-            <div style={{ position: "relative", marginBottom: 22, borderRadius: 20, overflow: "hidden", border: `1px solid ${t.border}`, boxShadow: t.shadowCard }}>
-                <div style={{ height: 210, background: "linear-gradient(135deg,#0d1117 0%,#161b2e 100%)" }} />
+            {/* The page's own title, as Documents has (2026-10-10): the
+                dashboard's top bar is not shown on this page. */}
+            <div style={{ margin: "4px 0 24px", display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h1 style={{ margin: 0, fontFamily: DOCS_FONT, fontSize: 34, fontWeight: 600, color: t.text, letterSpacing: "-0.2px", lineHeight: 1.15 }}>Lawyers</h1>
+                    <div style={{ marginTop: 6, fontFamily: DOCS_FONT, fontSize: 14, color: t.textMuted }}>Find a verified lawyer, compare fees and request a consultation.</div>
+                </div>
+                {/* This page is the list; the map is its own view (2026-10-10). */}
+                <style>{MAP_OPEN_CSS}</style>
+                <button type="button" data-map-open data-going={mapGoing ? "" : undefined} aria-label="Open map view"
+                    onClick={() => {
+                        if (mapGoing) return;
+                        setMapGoing(true);
+                        setTimeout(() => { setMapGoing(false); setActiveView("map"); }, 420);
+                    }}>
+                    <span className="mo-ic" aria-hidden="true">
+                        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                            <ellipse className="mo-shadow" cx="12" cy="21.5" rx="4" ry="1.2" fill="currentColor" stroke="none" opacity=".45" />
+                            <g className="mo-pin">
+                                <path d="M12 19.5s6.5-5.6 6.5-11a6.5 6.5 0 1 0-13 0c0 5.4 6.5 11 6.5 11z" />
+                                <circle cx="12" cy="8.5" r="2.3" />
+                            </g>
+                        </svg>
+                    </span>
+                    <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.15, whiteSpace: "nowrap" }}>
+                        Map view
+                        <span className="mo-sub">See lawyers on the map</span>
+                    </span>
+                    <svg className="mo-arrow" width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                </button>
+            </div>
 
-                {/* Left gradient overlay with text */}
-                <div style={{
-                    position: "absolute", inset: 0,
-                    background: "linear-gradient(to right, rgba(8,10,18,0.88) 0%, rgba(8,10,18,0.55) 45%, transparent 72%)",
-                    display: "flex", alignItems: "center", padding: "0 32px",
-                    pointerEvents: "none",
-                }}>
-                    <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                            <div style={{ width: 6, height: 6, borderRadius: "50%", background: t.primary }} />
-                            <span style={{ fontSize: 11, color: t.primary, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1.5px" }}>Legal Directory</span>
-                        </div>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1.25, marginBottom: 8, maxWidth: 280 }}>
-                            Find Expert Legal Counsel
-                        </div>
-                        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.62)", maxWidth: 260, lineHeight: 1.6, marginBottom: 18 }}>
-                            Browse listed lawyers and request a consultation time.
-                        </div>
-                        {/* Quick stats */}
-                        <div style={{ display: "flex", gap: 20 }}>
+            {/* ── Directory hero (2026-10-10) ─────────────────────────────
+                Left: what this page is, and the directory's real totals (the
+                server's, never one page's). Right: the AI match -- the way in
+                for a client who does not know whom to choose. Below: a running
+                request, when there is one, and what every listing guarantees. */}
+            <style>{LAWYERS_HERO_CSS}</style>
+            <section data-lawyers-hero aria-label="Legal directory">
+                <div className="lh-main">
+                    <div className="lh-left">
+                        <div className="lh-tag"><i aria-hidden="true" />Legal directory</div>
+                        <h2 className="lh-title">Find Expert Legal Counsel</h2>
+                        <p className="lh-text">Browse listed lawyers and request a consultation time.</p>
+                        <div className="lh-stats">
                             {[
-                                [lawyers.length, "Lawyers"],
-                                [lawyers.filter(l => l.avail).length, "Accepting Requests"],
-                                [new Set(lawyers.map(l => l.city)).size, "Cities"],
-                            ].map(([val, label]) => (
-                                <div key={label}>
-                                    <div style={{ fontSize: 20, fontWeight: 800, color: t.primary }}>{val}</div>
-                                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 1 }}>{label}</div>
-                                </div>
+                                ["Lawyers listed", dirTotals.all, "All verified", "var(--brand-text)",
+                                    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8",
+                                    () => { setFilter("All"); setFilters({ specialization: "All", city: "All", rating: 0, availability: "All" }); }],
+                                ["Accepting requests", dirTotals.accepting, "Show only these", "var(--teal-ink)", "M20 6L9 17l-5-5",
+                                    () => { setFilter("Available"); setFilters(f => ({ ...f, availability: "Available" })); }],
+                                ["Areas of law", AREA_CHIPS.filter(([, v]) => areaCounts[v] > 0).length || null, "With listed lawyers", "var(--gold)",
+                                    "M12 3v18M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z",
+                                    () => document.querySelector("[data-area-chips]")?.scrollIntoView({ behavior: "smooth", block: "center" })],
+                            ].map(([label, value, sub, c, d, go]) => (
+                                <button key={label} type="button" className="lh-stat" style={{ "--c": c }} onClick={go}>
+                                    <span className="ic" aria-hidden="true">
+                                        <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
+                                    </span>
+                                    <span className="v">{value ?? "—"}</span>
+                                    <span className="l">{label}</span>
+                                    <span className="s">{sub}</span>
+                                </button>
                             ))}
                         </div>
                     </div>
-                </div>
 
-            </div>
-
-            {/* Toolbar */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 220, position: "relative" }}>
-                    <ThemedInput
-                        value={query}
-                        onChange={e => setQuery(e.target.value)}
-                        placeholder="Search by name, specialization, city..."
-                        style={{ paddingLeft: 40 }}
-                    />
-                    <div style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)" }}>
-                        <Ic n="search" s={15} c={t.textMuted} />
+                    {/* The AI match: the same states and wording as before, here. */}
+                    <div className="lh-ai">
+                        <div className="lh-ai-tag">
+                            <span aria-hidden="true">
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /></svg>
+                            </span>
+                            AI match
+                        </div>
+                        {/* A listing is not a recommendation, so it does not get the
+                            recommendation heading. */}
+                        <h3 className="lh-ai-title">
+                            {aiMatch ? "AI-Recommended Match"
+                                : (matchKind === "general_listing" || matchKind === "none") ? "No strong match yet"
+                                    : "Not sure who to choose?"}
+                        </h3>
+                        <p className="lh-ai-text">
+                            {aiMatch
+                                // No `|| 0.97` fallback, and "match score" -- not
+                                // "case compatibility": match_score blends five
+                                // factors, of which semantic fit is only half.
+                                ? [aiMatch.name, aiMatch.spec,
+                                    aiMatch.match_score != null ? `${Math.round(aiMatch.match_score * 100)}% match score` : null,
+                                    aiMatch.match_reason || null].filter(Boolean).join(" — ")
+                                : matchNotice
+                                    ? matchNotice
+                                    : getCaseId()
+                                        ? "We read your Legal Intake and suggest the lawyer who fits your case best."
+                                        : "Fill in your Legal Intake first — it takes about 2 minutes — and we will suggest a lawyer for your case."}
+                        </p>
+                        <div className="lh-ai-row">
+                            {!aiMatch && !getCaseId() ? (
+                                <button type="button" className="lh-ai-btn" onClick={() => router.push("/intake")}>
+                                    Start intake (2 min)
+                                    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                                </button>
+                            ) : (
+                                <button type="button" className="lh-ai-btn" disabled={loadingMatch}
+                                    onClick={aiMatch ? () => { setSelectedLawyer(aiMatch); setActiveView("profile"); } : handleAiMatch}>
+                                    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" /></svg>
+                                    {loadingMatch ? "Matching…" : aiMatch ? "View Match" : "Find My Match"}
+                                </button>
+                            )}
+                            <span className="lh-ai-note">Uses your case type, city and details.</span>
+                        </div>
                     </div>
                 </div>
 
-                <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: `1px solid ${t.border}`, flexShrink: 0 }}>
-                    {["All", "Available", "Top Rated"].map(f => (
-                        <button key={f} onClick={() => {
-                            setFilter(f);
-                            if (f === "Available") setFilters(prev => ({ ...prev, availability: "Available" }));
-                            else if (f === "All") setFilters(prev => ({ ...prev, availability: "All" }));
-                        }} style={{
-                            padding: "9px 14px", fontSize: 12, fontWeight: 600, border: "none",
-                            cursor: "pointer", whiteSpace: "nowrap",
-                            background: filter === f ? t.primary : t.inputBg,
-                            color: filter === f ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted,
-                            transition: "all 0.15s", fontFamily: "'Inter',sans-serif",
-                        }}>{f}</button>
-                    ))}
-                </div>
+                {/* A running hire request, so the next step is one click away. */}
+                {(() => {
+                    const due = visibleEngagements.find(e => e.status === "terms_proposed");
+                    const e = due || visibleEngagements.find(x => x.status === "requested") || visibleEngagements.find(x => x.status === "accepted");
+                    if (!e) return null;
+                    const more = visibleEngagements.length - 1;
+                    const text = e.status === "terms_proposed" ? `${e.lawyer_name || "A lawyer"} sent you terms for ${e.case_title || "your case"}`
+                        : e.status === "requested" ? `Waiting for ${e.lawyer_name || "the lawyer"} to answer your request`
+                            : `${e.lawyer_name || "Your lawyer"} is engaged on ${e.case_title || "your case"}`;
+                    return (
+                        <div className="lh-running" data-due={due ? "true" : undefined}>
+                            <span className="dot" aria-hidden="true" />
+                            <span style={{ flex: 1, minWidth: 0 }}>{text}{more > 0 ? ` · +${more} more` : ""}</span>
+                            <button type="button" onClick={() => document.getElementById("my-hire-requests")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                                {due ? "Review terms" : "View requests"}
+                            </button>
+                        </div>
+                    );
+                })()}
 
-                <button onClick={() => setShowFilters(f => !f)} style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "10px 16px", borderRadius: 10, flexShrink: 0,
-                    border: `1.5px solid ${showFilters ? t.primary : t.border}`,
-                    background: showFilters ? t.primaryGlow : "transparent",
-                    color: showFilters ? t.primary : t.textMuted,
-                    fontSize: 13, fontWeight: 600, cursor: "pointer",
-                }}>
-                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-                    </svg>
+                <div className="lh-trust">
+                    <span><svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>Every listed lawyer is KYC-verified</span>
+                    <span><svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>Fees shown before you book</span>
+                    <span><svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>Hire only after a consultation</span>
+                </div>
+            </section>
+
+            {/* Toolbar (2026-10-10, the approved redesign): search, the
+                "Accepting requests" chip, Filters, Sort and List | Map in one
+                line. The Filters panel below is unchanged. */}
+            <style>{LAWYERS_TOOLS_CSS}</style>
+            <div data-lawyers-tools style={{ display: "flex", gap: 10, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <label className="lt-search">
+                    <Ic n="search" s={17} c="var(--faint)" />
+                    <span style={{ position: "absolute", left: -9999 }}>Search lawyers</span>
+                    <input ref={searchRef} type="search" value={query} onChange={e => setQuery(e.target.value)}
+                        placeholder="Search by name, specialization or city" />
+                    {query
+                        ? <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="lt-clear">×</button>
+                        : <span className="lt-kbd" aria-hidden="true">/</span>}
+                </label>
+
+                {/* Only lawyers taking new requests -- not a live schedule claim. */}
+                <button type="button" className="lt-pill lt-accepting" aria-pressed={filter === "Available"}
+                    onClick={() => {
+                        const on = filter !== "Available";
+                        setFilter(on ? "Available" : "All");
+                        setFilters(prev => ({ ...prev, availability: on ? "Available" : "All" }));
+                    }}>
+                    <span className="dot" aria-hidden="true" />Accepting requests
+                </button>
+
+                <LawyerSort value={sortBy} options={sortOptions} onChange={setSortBy} />
+
+                <button type="button" className="lt-pill" aria-expanded={showFilters} data-open={showFilters ? "true" : undefined} onClick={() => setShowFilters(f => !f)}>
+                    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="var(--teal-ink)" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4" /></svg>
                     Filters
-                </button>
-
-                <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
-                    background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text,
-                    borderRadius: 10, padding: "10px 14px", fontSize: 13, outline: "none", flexShrink: 0,
-                }}>
-                    {sortOptions.map(s => <option key={s}>{s}</option>)}
-                </select>
-
-                <button onClick={() => setActiveView("map")} style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "10px 16px", borderRadius: 10, flexShrink: 0,
-                    border: `1.5px solid ${t.border}`, background: "transparent",
-                    color: t.textMuted, fontSize: 13, fontWeight: 600, cursor: "pointer",
-                }}>
-                    <Ic n="map" s={14} c={t.textMuted} /> Map View
+                    {activeFilterCount > 0 && <span className="lt-count">{activeFilterCount}</span>}
                 </button>
             </div>
 
-            {/* Filter Panel */}
-            {showFilters && (
-                <div style={{ marginBottom: 20, background: t.inputBg, border: `1.5px solid ${t.primary}25`, borderRadius: 20, padding: "20px 24px 18px", boxShadow: `0 8px 32px rgba(0,0,0,0.2), inset 0 1px 0 ${t.primary}15` }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, paddingBottom: 14, borderBottom: `1px solid ${t.border}` }}>
-                        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={t.primary} strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: t.text }}>Filters</span>
-                    </div>
+            {/* Areas of law, one tap each (2026-10-10). The same filter as
+                Filters → Specialization; counts are the server's. */}
+            <div data-lawyers-tools data-area-chips role="group" aria-label="Area of law" className="lt-areas" style={{ display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", margin: "22px 0 28px", overflowX: "auto" }}>
+                {[["All", "All areas", null], ...AREA_CHIPS.map(([label, value, c]) => [value, label, c])].map(([value, label, c]) => (
+                    <button key={value} type="button" className="lt-area" aria-pressed={filters.specialization === value}
+                        style={c ? { "--c": c } : undefined}
+                        onClick={() => setFilters(f => ({ ...f, specialization: value }))}>
+                        {c && <span className="dot" aria-hidden="true" />}{label}
+                        {areaCounts[value] != null && value !== "All" && <span className="n">{areaCounts[value]}</span>}
+                    </button>
+                ))}
+            </div>
 
-                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+            {/* Filter Panel (restyled 2026-10-10 on the client theme; same fields) */}
+            {showFilters && (
+                <section data-lawyers-panel aria-label="Filters">
+                    <style>{LAWYERS_PANEL_CSS}</style>
+                    <header className="lp-head">
+                        <span className="lp-ic" aria-hidden="true">
+                            <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+                        </span>
                         <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg>
-                                <span style={{ fontSize: 10, color: t.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px" }}>Specialization</span>
+                            <h3 className="lp-title">Filters</h3>
+                            <div className="lp-sub">Narrow the directory. Changes apply as you choose.</div>
+                        </div>
+                        <button type="button" className="lp-x" aria-label="Close filters" onClick={() => setShowFilters(false)}>
+                            <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                        </button>
+                    </header>
+
+                    <div className="lp-body rgrid-2">
+                        <div>
+                            <div className="lp-label">
+                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg>
+                                Specialization
                             </div>
-                            <div style={{ position: "relative" }}>
-                                <select value={filters.specialization} onChange={e => setFilters(f => ({ ...f, specialization: e.target.value }))} style={{ width: "100%", background: t.surface, border: `1.5px solid ${filters.specialization !== "All" ? t.primary : t.border}`, color: filters.specialization !== "All" ? t.primary : t.text, borderRadius: 10, padding: "10px 36px 10px 14px", fontSize: 13, outline: "none", appearance: "none", cursor: "pointer", fontWeight: filters.specialization !== "All" ? 700 : 400, transition: "all 0.15s" }}>
-                                    <option value="All">All Specializations</option>
-                                    {specializations.filter(s => s !== "All").map(s => <option key={s}>{s}</option>)}
+                            <div className="lp-select" data-on={filters.specialization !== "All" ? "" : undefined}>
+                                <select aria-label="Specialization" value={filters.specialization} onChange={e => setFilters(f => ({ ...f, specialization: e.target.value }))}>
+                                    <option value="All">All specializations</option>
+                                    {AREA_CHIPS.map(([label, value]) => <option key={value} value={value}>{label}</option>)}
                                 </select>
-                                <svg style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+                                <svg className="chev" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
                             </div>
                         </div>
                         <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>
-                                <span style={{ fontSize: 10, color: t.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px" }}>City</span>
+                            <div className="lp-label">
+                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>
+                                City
                             </div>
-                            <div style={{ position: "relative" }}>
-                                <select value={filters.city} onChange={e => setFilters(f => ({ ...f, city: e.target.value }))} style={{ width: "100%", background: t.surface, border: `1.5px solid ${filters.city !== "All" ? t.primary : t.border}`, color: filters.city !== "All" ? t.primary : t.text, borderRadius: 10, padding: "10px 36px 10px 14px", fontSize: 13, outline: "none", appearance: "none", cursor: "pointer", fontWeight: filters.city !== "All" ? 700 : 400, transition: "all 0.15s" }}>
-                                    <option value="All">Search city...</option>
+                            <div className="lp-select" data-on={filters.city !== "All" ? "" : undefined}>
+                                <select aria-label="City" value={filters.city} onChange={e => setFilters(f => ({ ...f, city: e.target.value }))}>
+                                    <option value="All">All cities</option>
                                     {cities.filter(c => c !== "All").map(c => <option key={c}>{c}</option>)}
                                 </select>
-                                <svg style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+                                <svg className="chev" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
                             </div>
                         </div>
-                    </div>
 
-                    <div style={{ marginBottom: 20 }}>
                         <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                                <svg width={12} height={12} viewBox="0 0 24 24" fill={t.warn} stroke={t.warn} strokeWidth="1"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
-                                <span style={{ fontSize: 10, color: t.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px" }}>Rating</span>
+                            <div className="lp-label">
+                                <svg className="gold" width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                                Rating
                             </div>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                {[{ label: "Any", val: 0 }, { label: "3+", val: 3 }, { label: "4+", val: 4 }, { label: "4.5+", val: 4.5 }, { label: "5.0", val: 5 }].map(({ label, val }) => {
-                                    const isActive = filters.rating === val;
-                                    return (
-                                        <button key={label} onClick={() => setFilters(f => ({ ...f, rating: val }))} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, border: `1.5px solid ${isActive ? t.warn : t.border}`, background: isActive ? `${t.warn}18` : "transparent", color: isActive ? t.warn : t.textMuted, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 5 }}>
-                                            {val > 0 && <svg width={10} height={10} viewBox="0 0 24 24" fill={isActive ? t.warn : "none"} stroke={isActive ? t.warn : t.textMuted} strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>}
-                                            {label}
-                                        </button>
-                                    );
-                                })}
+                            <div role="radiogroup" aria-label="Rating" className="lp-chips">
+                                {[{ label: "Any", val: 0 }, { label: "3+", val: 3 }, { label: "4+", val: 4 }, { label: "4.5+", val: 4.5 }, { label: "5.0", val: 5 }].map(({ label, val }) => (
+                                    <button key={label} type="button" role="radio" aria-checked={filters.rating === val} className={val > 0 ? "lp-chip star" : "lp-chip"}
+                                        onClick={() => setFilters(f => ({ ...f, rating: val }))}>
+                                        {val > 0 && <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>}
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Availability: whether a lawyer is taking new requests -- the
+                            server's own flag, not a live schedule. Kept in step with the
+                            toolbar's "Accepting requests" chip. */}
+                        <div>
+                            <div className="lp-label">
+                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                                Availability
+                            </div>
+                            <div data-availability-options role="radiogroup" aria-label="Availability" className="lp-chips">
+                                {[{ label: "Any", val: "All", c: null }, { label: "Accepting requests", val: "Available", c: "var(--brand-text)" }, { label: "Not accepting", val: "Busy", c: "var(--faint)" }].map(({ label, val, c }) => (
+                                    <button key={val} type="button" role="radio" aria-checked={filters.availability === val} className="lp-chip"
+                                        style={c ? { "--c": c } : undefined}
+                                        onClick={() => { setFilter(val === "Available" ? "Available" : "All"); setFilters(f => ({ ...f, availability: val })); }}>
+                                        {c && <span className="dot" aria-hidden="true" />}
+                                        {label}
+                                    </button>
+                                ))}
                             </div>
                         </div>
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 14, borderTop: `1px solid ${t.border}` }}>
-                        <div style={{ fontSize: 12, color: t.textMuted }}>
-                            <span style={{ color: t.primary, fontWeight: 700 }}>{filtered.length}</span> lawyers match
-                        </div>
-                        <div style={{ display: "flex", gap: 10 }}>
-                            <button onClick={() => setFilters({ specialization: "All", city: "All", rating: 0, availability: "All" })} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: t.textMuted, background: "none", border: `1.5px solid ${t.border}`, cursor: "pointer", padding: "9px 18px", borderRadius: 10, transition: "all 0.15s" }}
-                                onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
-                                onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
-                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-4.5" /></svg>
-                                Reset
-                            </button>
-                            <button onClick={() => setShowFilters(false)} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: t.mode === "dark" ? "#1A2E35" : "#fff", background: t.primary, border: "none", cursor: "pointer", padding: "9px 22px", borderRadius: 10 }}
-                                onMouseEnter={e => e.currentTarget.style.opacity = "0.9"}
-                                onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
-                                Show {filtered.length} Lawyers
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <footer className="lp-foot">
+                        <span className="lp-count"><b>{filtered.length}</b> {filtered.length === 1 ? "lawyer matches" : "lawyers match"}</span>
+                        <button type="button" className="lp-reset" onClick={() => { setFilter("All"); setFilters({ specialization: "All", city: "All", rating: 0, availability: "All" }); }}>
+                            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-4.5" /></svg>
+                            Reset
+                        </button>
+                        <button type="button" className="lp-show" onClick={() => setShowFilters(false)}>
+                            Show {filtered.length} {filtered.length === 1 ? "lawyer" : "lawyers"}
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                        </button>
+                    </footer>
+                </section>
             )}
 
             {/* My hire requests */}
             {(visibleEngagements.length > 0 || endedEngagements.length > 0) && (
-                <div style={{ background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16, padding: "14px 18px", marginBottom: 20 }}>
+                <div id="my-hire-requests" style={{ scrollMarginTop: 16, background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16, padding: "14px 18px", marginBottom: 20 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, color: t.text, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
                         <Ic n="shield" s={14} c={t.primary} /> My Hire Requests
                     </div>
@@ -1828,59 +2464,121 @@ const ModLawyers = () => {
                 </div>
             )}
 
-            {/* AI Match Banner */}
-            <div style={{ background: `linear-gradient(135deg,${t.primaryGlow},transparent)`, border: `1.5px dashed ${t.primary}40`, borderRadius: 16, padding: 16, marginBottom: 20, display: "flex", alignItems: "center", gap: 14 }}>
-                <div style={{ width: 42, height: 42, borderRadius: 13, background: `${t.primary}20`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Ic n="zap" s={20} c={t.primary} />
-                </div>
-                <div style={{ flex: 1 }}>
-                    {/* A listing is not a recommendation, so it does not get the
-                        recommendation heading. */}
-                    <div style={{ fontWeight: 700, color: t.text, fontSize: 13 }}>
-                        {!aiMatch && (matchKind === "general_listing" || matchKind === "none")
-                            ? "No strong match yet"
-                            : "AI-Recommended Match"}
+            {/* AI Match box (2026-10-10). "Find My Match" turns the text into a
+                message box; what the client writes is read in the browser into
+                the list's own filters (area of law, province), which they can
+                see and clear. Nothing typed here is sent to the server. */}
+            <section data-ai-ask data-open={askOpen ? "" : undefined} aria-label="AI match">
+                <style>{AI_ASK_CSS}</style>
+                {!askOpen ? (
+                <div className="aa-row">
+                    <div style={{ width: 42, height: 42, borderRadius: 13, background: `${t.primary}20`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Ic n="zap" s={20} c={t.primary} />
                     </div>
-                    <div style={{ fontSize: 12, color: t.textMuted }}>
-                        {aiMatch
-                            // No `|| 0.97` fallback. A missing score used to
-                            // render as "97% case compatibility" on lawyers the
-                            // matcher had never scored against the case.
-                            ? [
-                                aiMatch.name,
-                                aiMatch.spec,
-                                // "match score", not "case compatibility".
-                                // match_score is a weighted blend of five
-                                // factors — semantic fit is only half of it,
-                                // the rest is specialization, province, rating,
-                                // availability and experience. A lawyer with no
-                                // measured relevance to the case still scores
-                                // ~0.48 on the other factors alone, and calling
-                                // that "48% case compatibility" claims a
-                                // measurement of fit the number does not carry.
-                                aiMatch.match_score != null
-                                    ? `${Math.round(aiMatch.match_score * 100)}% match score`
-                                    : null,
-                                aiMatch.match_reason || null,
-                            ].filter(Boolean).join(" — ")
-                            : matchNotice
-                                ? matchNotice
-                                : getCaseId()
-                                    ? "Click to find your AI-matched lawyer"
-                                    : "Complete intake form first to get your AI match"}
+                    <div style={{ flex: 1 }}>
+                        {/* A listing is not a recommendation, so it does not get the
+                            recommendation heading. */}
+                        <div style={{ fontWeight: 700, color: t.text, fontSize: 13 }}>
+                            {!aiMatch && (matchKind === "general_listing" || matchKind === "none")
+                                ? "No strong match yet"
+                                : "AI-Recommended Match"}
+                        </div>
+                        <div style={{ fontSize: 12, color: t.textMuted }}>
+                            {aiMatch
+                                // No `|| 0.97` fallback. A missing score used to
+                                // render as "97% case compatibility" on lawyers the
+                                // matcher had never scored against the case.
+                                ? [
+                                    aiMatch.name,
+                                    aiMatch.spec,
+                                    // "match score", not "case compatibility".
+                                    // match_score is a weighted blend of five
+                                    // factors — semantic fit is only half of it,
+                                    // the rest is specialization, province, rating,
+                                    // availability and experience. A lawyer with no
+                                    // measured relevance to the case still scores
+                                    // ~0.48 on the other factors alone, and calling
+                                    // that "48% case compatibility" claims a
+                                    // measurement of fit the number does not carry.
+                                    aiMatch.match_score != null
+                                        ? `${Math.round(aiMatch.match_score * 100)}% match score`
+                                        : null,
+                                    aiMatch.match_reason || null,
+                                ].filter(Boolean).join(" — ")
+                                : matchNotice
+                                    ? matchNotice
+                                    : getCaseId()
+                                        ? "Describe your problem to filter the list, or match from your intake case"
+                                        : "Describe your problem and we'll filter the list for you"}
+                        </div>
                     </div>
+                    <BtnPrimary
+                        disabled={loadingMatch}
+                        onClick={aiMatch
+                            ? () => { setSelectedLawyer(aiMatch); setActiveView("profile"); }
+                            : () => { setAskOpen(true); setTimeout(() => askRef.current?.focus(), 0); }
+                        }
+                        style={{ fontSize: 12, padding: "10px 18px", flexShrink: 0, opacity: loadingMatch ? 0.7 : 1 }}
+                    >
+                        {loadingMatch ? "Matching…" : aiMatch ? "View Match" : "Find My Match"}
+                    </BtnPrimary>
                 </div>
-                <BtnPrimary
-                    disabled={loadingMatch}
-                    onClick={aiMatch
-                        ? () => { setSelectedLawyer(aiMatch); setActiveView("profile"); }
-                        : handleAiMatch
-                    }
-                    style={{ fontSize: 12, padding: "10px 18px", flexShrink: 0, opacity: loadingMatch ? 0.7 : 1 }}
-                >
-                    {loadingMatch ? "Matching…" : aiMatch ? "View Match" : "Find My Match"}
-                </BtnPrimary>
-            </div>
+                ) : (
+                    <form className="aa-row" onSubmit={e => {
+                        e.preventDefault();
+                        const text = askText.trim();
+                        if (!text) return;
+                        const read = readProblem(text);
+                        setAskResult({ ...read, text });
+                        if (read.area || read.province) {
+                            setFilters(f => ({
+                                ...f,
+                                specialization: read.area || "All",
+                                city: read.province || "All",
+                            }));
+                        }
+                    }}>
+                        <span className="aa-ic" aria-hidden="true"><Ic n="zap" s={20} c={t.primary} /></span>
+                        <label className="aa-field">
+                            <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Describe your problem</span>
+                            <input ref={askRef} type="text" value={askText} maxLength={PROBLEM_MAX_LENGTH}
+                                onChange={e => setAskText(e.target.value)}
+                                onKeyDown={e => { if (e.key === "Escape") setAskOpen(false); }}
+                                placeholder="Apna masla likhein… e.g. mere bhai ne plot par qabza kar liya hai (Lahore)" />
+                            <span className="aa-hint" aria-hidden="true">Enter ↵</span>
+                        </label>
+                        <button type="submit" className="aa-send" disabled={!askText.trim()}>
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+                            Send
+                        </button>
+                        <button type="button" className="aa-x" aria-label="Close" onClick={() => setAskOpen(false)}>
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                        </button>
+                    </form>
+                )}
+
+                {askOpen && askResult && (
+                    <div className="aa-out" role="status">
+                        {askResult.area || askResult.province ? (<>
+                            <span>Filtered the list for:</span>
+                            {askResult.area && <span className="aa-tag">{askResult.areaLabel}</span>}
+                            {askResult.province && <span className="aa-tag">{askResult.province}</span>}
+                            <span>· {pageInfo.total} lawyer{pageInfo.total === 1 ? "" : "s"}</span>
+                            <button type="button" className="aa-link" onClick={() => {
+                                setAskResult(null);
+                                setFilters(f => ({ ...f, specialization: "All", city: "All" }));
+                            }}>Clear</button>
+                        </>) : (
+                            <span>Could not tell the area of law from that. Try words like "divorce", "FIR", "plot" or "salary", or pick an area above.</span>
+                        )}
+                        {getCaseId() && (
+                            <button type="button" className="aa-link" disabled={loadingMatch} onClick={handleAiMatch}>
+                                {loadingMatch ? "Matching…" : "Or match from my intake case"}
+                            </button>
+                        )}
+                    </div>
+                )}
+            </section>
 
             {/* Results count.
                 Reports the page AND the total, because `filtered.length` alone
@@ -1892,125 +2590,59 @@ const ModLawyers = () => {
                 {pageInfo.pages > 1 && <> · page {page} of {pageInfo.pages}</>}
             </div>
 
-            {/* ── LAWYER CARDS (redesigned) ─────────────────────────── */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(290px,1fr))", gap: 16 }}>
+            {/* ── LAWYER CARDS (2026-10-10, the approved mockup) ──────────
+                Every lawyer listed here is KYC-verified (the directory query
+                requires it). Empty fields say so in words, never "0yr" or "—". */}
+            <style>{LAWYERS_CARD_CSS}</style>
+            <div data-lawyers-grid style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(270px,320px))", gap: 16 }}>
                 {filtered.map((l) => {
-                    const ac = getAccent(l);
+                    const specs = String(l.spec || "").split(",").map(s => s.trim()).filter(Boolean);
+                    const shownSpecs = specs.slice(0, 2);
                     return (
-                        <div
-                            key={l._id || l.bar}
-                            onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}
-                            style={{
-                                background: t.card,
-                                border: `1px solid ${t.border}`,
-                                borderRadius: 18,
-                                overflow: "hidden",
-                                cursor: "pointer",
-                                transition: "transform 0.18s, box-shadow 0.18s",
-                                position: "relative",
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = t.shadowHover; }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
-                        >
-                            {/* Accent top bar */}
-                            <div style={{ height: 4, background: ac.solid, width: "100%" }} />
-
-                            <div style={{ padding: "16px 18px 18px" }}>
-
-                                {/* Header row: avatar + name + province badge */}
-                                <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12 }}>
-                                    <div style={{
-                                        width: 52, height: 52, borderRadius: 15,
-                                        background: ac.light,
-                                        border: `1.5px solid ${ac.solid}44`,
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        fontSize: 17, fontWeight: 800, color: ac.solid, flexShrink: 0,
-                                    }}>
-                                        {l.name.split(" ").map(w => w[0]).join("").slice(0, 2)}
+                        <article key={l._id || l.bar} className="lc-card" onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}>
+                            <div className="lc-head">
+                                <span className="lc-av" aria-hidden="true">{l.name.split(" ").map(w => w[0]).join("").slice(0, 2)}</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div className="lc-name-row">
+                                        <div className="lc-name">{l.name}</div>
+                                        <span className="lc-verified">
+                                            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+                                            Verified
+                                        </span>
                                     </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 800, color: t.text, fontSize: 14, lineHeight: 1.2 }}>{l.name}</div>
-                                        <div style={{ fontSize: 12, color: ac.solid, fontWeight: 600, marginTop: 2 }}>{l.spec}</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>{l.bar || UNAVAILABLE}</div>
-                                    </div>
-                                    {/* Distance pill */}
-                                    <div style={{
-                                        display: "flex", alignItems: "center", gap: 4,
-                                        background: t.inputBg, borderRadius: 20,
-                                        padding: "4px 9px", fontSize: 11, color: t.textMuted, flexShrink: 0,
-                                    }}>
-                                        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
-                                        </svg>
-                                        {l.city}
-                                    </div>
+                                    <div className="lc-bar">{l.bar ? `Bar: ${l.bar}` : "Bar number not provided"}</div>
                                 </div>
-
-                                {/* Stars + availability */}
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                        <StarRow rating={l.rating} color={ac.solid} size={12} />
-                                        <span style={{ fontSize: 12, color: t.textMuted }}>{l.rating} <span style={{ fontSize: 11 }}>({l.reviews})</span></span>
-                                    </div>
-                                    {/* Availability chip */}
-                                    <div style={{
-                                        display: "flex", alignItems: "center", gap: 5,
-                                        padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-                                        background: l.avail ? `${ac.solid}18` : t.inputBg,
-                                        color: l.avail ? ac.solid : t.textMuted,
-                                    }}>
-                                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: l.avail ? ac.solid : t.textMuted }} />
-                                        {l.avail ? "Available" : "Busy"}
-                                    </div>
-                                </div>
-
-                                {/* Stats row */}
-                                <div style={{
-                                    display: "grid", gridTemplateColumns: "1fr 1px 1fr 1px 1fr",
-                                    background: t.inputBg, borderRadius: 12, padding: "10px 0",
-                                    marginBottom: 14,
-                                }}>
-                                    {[["Experience", `${l.exp}yr`], null, ["Fee/hr", fmtFeeK(l.fee)], null, ["City", l.city]].map((item, i) => {
-                                        if (item === null) return <div key={i} style={{ background: t.border, width: 1, margin: "4px 0" }} />;
-                                        const [label, val] = item;
-                                        return (
-                                            <div key={label} style={{ textAlign: "center", padding: "0 8px" }}>
-                                                <div style={{ fontSize: 10, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>{label}</div>
-                                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{val}</div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-
-                                {/* Action buttons */}
-                                <div style={{ display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
-                                    <BtnOutline
-                                        onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}
-                                        style={{ flex: 1, fontSize: 12, padding: "10px" }}
-                                    >
-                                        View Profile
-                                    </BtnOutline>
-                                    <button
-                                        disabled={!l.avail}
-                                        onClick={() => { if (l.avail) { openBooking(l); } }}
-                                        style={{
-                                            flex: 1, fontSize: 12, padding: "10px",
-                                            borderRadius: 10, border: "none",
-                                            background: l.avail ? ac.solid : t.inputBg,
-                                            color: l.avail ? "#fff" : t.textMuted,
-                                            fontWeight: 700, cursor: l.avail ? "pointer" : "not-allowed",
-                                            opacity: l.avail ? 1 : 0.5,
-                                            transition: "opacity 0.15s",
-                                            fontFamily: "'Inter',sans-serif",
-                                        }}
-                                        onMouseEnter={e => { if (l.avail) e.currentTarget.style.opacity = "0.88"; }}
-                                        onMouseLeave={e => { if (l.avail) e.currentTarget.style.opacity = "1"; }}
-                                    >
-                                        Book Now
-                                    </button>
-                                </div>
+                                <span className="lc-avail" data-off={l.avail ? undefined : "true"}>{l.avail ? "● Accepting" : "○ Not accepting"}</span>
                             </div>
-                        </div>
+
+                            <div className="lc-chips">
+                                {shownSpecs.map(s => <span key={s}>{s}</span>)}
+                                {specs.length > shownSpecs.length && <span>+{specs.length - shownSpecs.length}</span>}
+                            </div>
+
+                            <div className="lc-rating" data-none={l.reviews > 0 ? undefined : "true"}>
+                                {l.reviews > 0 ? <>★ {Number(l.rating).toFixed(1)} · {l.reviews} review{l.reviews === 1 ? "" : "s"}</> : "No reviews yet"}
+                            </div>
+
+                            <div className="lc-facts">
+                                <div><b>{l.exp > 0 ? `${l.exp} yr${l.exp === 1 ? "" : "s"}` : "New"}</b><span>experience</span></div>
+                                <div><b>{l.fee ? `Rs ${l.fee.toLocaleString()}` : "On request"}</b><span>fee per hour</span></div>
+                                <div><b>{l.city}</b><span>province</span></div>
+                            </div>
+
+                            <div className="lc-actions" onClick={e => e.stopPropagation()}>
+                                <button type="button" className="lc-book" disabled={!l.avail}
+                                    title={l.avail ? undefined : "This lawyer is not taking new requests"}
+                                    onClick={() => { if (l.avail) openBooking(l); }}>
+                                    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 11h18" /></svg>
+                                    Book consultation
+                                </button>
+                                <button type="button" className="lc-view" onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}>
+                                    View profile
+                                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                                </button>
+                            </div>
+                        </article>
                     );
                 })}
 

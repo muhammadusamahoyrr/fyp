@@ -110,7 +110,7 @@ test("the list groups by what to do next, sorts by next hearing, and hides close
     assert.doesNotMatch(text, /CIV-2026-004/, "a closed case is in the live list");
     assert.match(text, /in 5 days/);
 
-    await click(allButtons(view.container).find(b => b.textContent.startsWith("History")));
+    await click(allButtons(view.container).find(b => b.getAttribute("role") === "tab" && b.textContent.trim().startsWith("Closed")));
     assert.match(view.container.textContent, /CIV-2026-004/);
     await view.unmount();
 });
@@ -237,8 +237,9 @@ test("the bar: chips, History on the right, then search, Sort and Filter", async
     const view = await mount();
     const chips = [...view.container.querySelectorAll('[role="tablist"][aria-label="Filter cases"] [role="tab"]')]
         .map(b => b.textContent.replace(/\d+$/, "").trim());
-    assert.deepEqual(chips, ["All", "Needs me", "New requests", "Not filed yet", "Active"]);
-    assert.ok(allButtons(view.container).some(b => /History · Closed 1$/.test(b.textContent.trim())));
+    // Closed is one of the views since 2026-10-11, not a separate History box.
+    assert.deepEqual(chips, ["All", "Needs me", "New requests", "Not filed yet", "Active", "Closed"]);
+    assert.ok(allButtons(view.container).some(b => /^Closed\s*1$/.test(b.textContent.trim())));
     assert.ok(view.container.querySelector('input[aria-label="Search cases"]'));
     assert.ok(allButtons(view.container).some(b => b.textContent.trim() === "Sort"));
     assert.ok(allButtons(view.container).some(b => b.textContent.trim().startsWith("Filter")));
@@ -331,6 +332,7 @@ test("the header buttons match the bar's height", async () => {
     const sortBtn = allButtons(view.container).find(b => b.textContent.trim() === "Sort");
     assert.equal(exportBtn.style.height, "44px");
     assert.equal(newBtn.style.height, "44px");
+    // Sort sits in the one-line filter bar (2026-10-11), at the tab group's height.
     assert.equal(sortBtn.style.height, "44px");
     await view.unmount();
 });
@@ -571,5 +573,57 @@ test("Ctrl K focuses the one search; Enter opens the case when the search leaves
     await act(async () => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
     await settle();
     assert.ok(view.container.querySelector('[aria-label="Case sections"]'), "Enter did not open the only match");
+    await view.unmount();
+});
+
+test("the Documents tab shows what the client sent on this case, opened at the revision sent", async () => {
+    api.__respond("reviewQueueV2", { data: { items: [
+        { id: "cd1", title: "Plaint — recovery", case_id: SOON._id, review_status: "returned", client_name: "Ayesha",
+          submitted_version: 2, reviewed_revision_id: "rev-2", reviewed_pdf_sha256: "hash-2" },
+        { id: "other", title: "Some other case's notice", case_id: "elsewhere", review_status: "submitted" },
+        { id: "pend", title: "Notice waiting", case_id: SOON._id, review_status: "submitted", client_name: "Ayesha",
+          submitted_version: 1, submitted_revision_id: "rev-p", submitted_pdf_sha256: "hash-p" },
+    ], next_cursor: null }, error: null });
+    api.__respond("fetchRevisionPreview", { data: { url: "blob:x" }, error: null });
+    const view = await mount({ openAt: SOON.case_number });
+    await click(tab(view.container, "Documents"));
+    const row = view.container.querySelector('[data-case-doc="cd1"]');
+    assert.ok(row, "the client's document is not listed on its case");
+    assert.match(row.textContent, /Sent by Ayesha · v2/);
+    assert.match(row.textContent, /Returned/);
+    assert.equal(view.container.querySelector('[data-case-doc="other"]'), null, "another case's document leaked in");
+    const pending = view.container.querySelector('[data-case-doc="pend"]');
+    assert.match(pending.textContent, /Waiting for you/);
+    assert.equal([...pending.querySelectorAll("button")].find(b => b.textContent.trim() === "Open").disabled, false,
+        "a document waiting for the lawyer cannot be opened");
+    const realOpen = window.open; window.open = () => ({});
+    await click([...row.querySelectorAll("button")].find(b => b.textContent.trim() === "Open"));
+    window.open = realOpen;
+    const [id, opts] = api.__calls("fetchRevisionPreview")[0].args;
+    assert.equal(id, "cd1");
+    assert.deepEqual(opts, { revisionId: "rev-2", expectedPdfSha256: "hash-2" });
+    await view.unmount();
+});
+
+test("Your files: listed for this case, uploaded through the API, and marked as private", async () => {
+    api.__respond("listCaseFiles", { data: { items: [
+        { id: "f1", name: "summons.pdf", content_type: "application/pdf", size: 2048, created_at: "2026-10-11T10:00:00Z" },
+    ] }, error: null });
+    api.__respond("uploadCaseFile", { data: { id: "f2", name: "order.png", content_type: "image/png", size: 4096 }, error: null, status: 201 });
+    const view = await mount({ openAt: SOON.case_number });
+    await click(tab(view.container, "Documents"));
+    assert.equal(api.__calls("listCaseFiles")[0].args[0], SOON._id);
+    const box = view.container.querySelector("[data-case-files]");
+    assert.match(box.textContent, /Only you can see these/);
+    assert.ok(box.querySelector('[data-case-file="f1"]'));
+    const input = box.querySelector('input[type="file"]');
+    const file = new File(["\x89PNG"], "order.png", { type: "image/png" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    await new Promise(r => setTimeout(r, 30));
+    const [caseId, sent] = api.__calls("uploadCaseFile")[0].args;
+    assert.equal(caseId, SOON._id);
+    assert.equal(sent.name, "order.png");
+    assert.ok(view.container.querySelector('[data-case-file="f2"]'), "the uploaded file is not listed");
     await view.unmount();
 });

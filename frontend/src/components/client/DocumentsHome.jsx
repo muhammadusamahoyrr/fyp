@@ -16,7 +16,9 @@
  * `to_confirm`, and so does this screen. It is never shown as a pass.
  */
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useT } from "./theme.js";
+import { tint } from "./clientTheme.js";
 import { humanise } from "@/lib/fieldReview.js";
 import { pleadingRequirements } from "@/lib/api.js";
 import TemplateEditor from "./documents/TemplateEditor.jsx";
@@ -36,9 +38,10 @@ const MODE_VIEW = {
 const COURT_CATEGORIES = ["Civil", "Criminal", "Court", "Family"];
 
 function tileFor(spec) {
-    if (/notice/i.test(spec.label || "")) return { icon: Icon.mail, bg: "#1d3f5a", fg: "#9fd0f5" };
-    if (COURT_CATEGORIES.includes(spec.category)) return { icon: Icon.court, bg: "#2f2a4a", fg: "#c9bff5" };
-    return { icon: Icon.contract, bg: "#1f4a4f", fg: "#3fd6c6" };
+    // `ink`: the same kind of tile on the dashboard palette (clientTheme.js).
+    if (/notice/i.test(spec.label || "")) return { icon: Icon.mail, bg: "#1d3f5a", fg: "#9fd0f5", ink: "var(--c-contract)" };
+    if (COURT_CATEGORIES.includes(spec.category)) return { icon: Icon.court, bg: "#2f2a4a", fg: "#c9bff5", ink: "var(--teal-ink)" };
+    return { icon: Icon.contract, bg: "#1f4a4f", fg: "#3fd6c6", ink: "var(--brand-text)" };
 }
 
 const TRY_PROMPTS = [
@@ -224,21 +227,99 @@ const POPULAR_DRAFTS = [
 
 /* A native select drawn as the composer's pill: icon, value, chevron. Native,
  * so keyboard and screen readers work as they do for any select. */
+/* A compact pill that opens the app's own menu (2026-10-10). The browser's
+ * native dropdown looked different in every browser and filled the screen; the
+ * menu is now drawn here, in the theme: rounded, the choice ticked, hover and
+ * arrow-key highlight, Enter to choose, Escape to close. It renders in a portal
+ * at a fixed position (the composer clips overflow) and opens upward when there
+ * is no room below. The real <select> stays, visually hidden, as the value's
+ * source of truth: `onChange` receives the same event shape as before. */
+const PILL_CSS = `[data-client-theme] .pill-menu{position:fixed;z-index:9999;max-height:300px;overflow:auto;min-width:200px;max-width:320px;padding:4px;border-radius:11px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 18px 36px -12px rgba(0,0,0,.6);scrollbar-width:none;-ms-overflow-style:none}
+[data-client-theme] .pill-menu::-webkit-scrollbar{display:none}
+[data-client-theme] .pill-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:6px 9px;border:0;border-radius:7px;background:none;color:var(--ink);font-family:inherit;font-size:13px;font-weight:500;line-height:1.35;text-align:left;cursor:pointer}
+[data-client-theme] .pill-menu button[data-hot]{background:var(--hover-tint);color:var(--hover-ink)}
+[data-client-theme] .pill-menu button[aria-selected="true"]{color:var(--brand-text);font-weight:600}
+[data-client-theme] .pill-menu button .tick{margin-left:auto;flex:none}
+[data-client-theme] [data-pill]{transition:border-color .15s,background .15s}
+[data-client-theme] [data-pill]:hover,[data-client-theme] [data-pill][data-open]{border-color:var(--hover-line)!important;background:var(--hover-tint)!important}`;
+
 function PillSelect({ t, id, label, icon, value, onChange, shown = "", warn = false, title, children, ...rest }) {
+    const selectRef = useRef(null);
+    const pillRef = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [hot, setHot] = useState(0);
+    const [pos, setPos] = useState(null);
+    // The choices, read from the <option> children.
+    const options = React.Children.toArray(children).filter(Boolean).map(o => ({ value: o.props.value ?? "", label: o.props.children }));
+    const choose = v => {
+        const el = selectRef.current;
+        if (el && v !== value) {
+            // Through the real select, so onChange gets the event it always got.
+            Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value").set.call(el, v);
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        setOpen(false);
+        pillRef.current?.focus();
+    };
+    const place = () => {
+        const r = pillRef.current?.getBoundingClientRect();
+        if (!r) return;
+        const below = window.innerHeight - r.bottom;
+        const up = below < 320 && r.top > below;
+        setPos({ left: Math.min(r.left, window.innerWidth - 350), ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
+    };
+    const openMenu = () => { place(); setHot(Math.max(0, options.findIndex(o => o.value === value))); setOpen(true); };
+    useEffect(() => {
+        if (!open) return undefined;
+        const out = e => { if (!pillRef.current?.contains(e.target) && !e.target.closest?.("[data-pill-menu]")) setOpen(false); };
+        const close = () => setOpen(false);
+        document.addEventListener("mousedown", out);
+        window.addEventListener("resize", close);
+        window.addEventListener("scroll", close, true);
+        return () => { document.removeEventListener("mousedown", out); window.removeEventListener("resize", close); window.removeEventListener("scroll", close, true); };
+    }, [open]);
+    const onKey = e => {
+        if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) { e.preventDefault(); openMenu(); return; }
+        if (!open) return;
+        if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+        else if (e.key === "ArrowDown") { e.preventDefault(); setHot(h => Math.min(options.length - 1, h + 1)); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); setHot(h => Math.max(0, h - 1)); }
+        else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (options[hot]) choose(options[hot].value); }
+        else if (e.key === "Tab") setOpen(false);
+    };
+    const menuId = `${id}-menu`;
     return (
-        <label htmlFor={id} title={title || shown} data-pill style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 7, minHeight: 38, padding: "0 26px 0 11px", borderRadius: 10, boxSizing: "border-box", flexShrink: 0,
-            border: `1px solid ${warn ? t.warn : t.border}`, boxShadow: warn ? `0 0 0 2px ${t.warn}33` : "none", background: t.bg, color: t.text, fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
-            {icon && <LIcon name={icon} size={15} style={{ color: t.textMuted }} />}
-            <span style={{ position: "absolute", left: -9999 }}>{label}</span>
-            <span aria-hidden="true" data-pill-value style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 }}>{shown}</span>
-            <select id={id} value={value} onChange={onChange} {...rest}
-                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", appearance: "none", WebkitAppearance: "none", border: "none", font: "inherit" }}>
+        <span style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+            <style>{PILL_CSS}</style>
+            <button type="button" ref={pillRef} data-pill data-open={open ? "true" : undefined} title={title || shown}
+                aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? menuId : undefined} aria-label={`${label}: ${shown}`}
+                onClick={() => (open ? setOpen(false) : openMenu())} onKeyDown={onKey}
+                style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6, height: 34, padding: "0 26px 0 10px", borderRadius: 10, boxSizing: "border-box",
+                    border: `1px solid ${warn ? t.warn : t.border}`, boxShadow: warn ? `0 0 0 2px ${t.warn}33` : "none", background: t.bg, color: t.text, fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+                {icon && <LIcon name={icon} size={14} style={{ color: t.textMuted }} />}
+                <span data-pill-value style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 170 }}>{shown}</span>
+                <LIcon name="chevronDown" size={13} style={{ position: "absolute", right: 9, pointerEvents: "none", color: t.textMuted, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+            </button>
+            {/* The value's source of truth (and what assistive tech and tests read). */}
+            <label htmlFor={id} style={{ position: "absolute", left: -9999 }}>{label}</label>
+            <select id={id} ref={selectRef} value={value} onChange={onChange} tabIndex={-1} aria-hidden="true" {...rest}
+                style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none", overflow: "hidden", clip: "rect(0 0 0 0)" }}>
                 {children}
             </select>
-            <LIcon name="chevronDown" size={14} style={{ position: "absolute", right: 9, pointerEvents: "none", color: t.textMuted }} />
-            {/* The select is invisible, so the pill shows its keyboard focus. */}
-            <style>{`[data-pill]:has(select:focus-visible){outline:2px solid ${t.primary};outline-offset:2px}`}</style>
-        </label>
+            {open && pos && createPortal(
+                <div id={menuId} role="listbox" aria-label={label} className="pill-menu" data-pill-menu data-lenis-prevent style={pos}>
+                    {options.map((o, i) => (
+                        <button key={o.value || "none"} type="button" role="option" aria-selected={o.value === value}
+                            data-hot={i === hot ? "true" : undefined} onMouseEnter={() => setHot(i)}
+                            onMouseDown={e => e.preventDefault()} onClick={() => choose(o.value)}>
+                            <span style={{ minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.label}</span>
+                            {o.value === value && <span className="tick" style={{ display: "flex" }}><LIcon name="check" size={14} stroke={2.4} /></span>}
+                        </button>
+                    ))}
+                </div>,
+                document.body,
+            )}
+        </span>
     );
 }
 
@@ -390,11 +471,14 @@ export default function DocumentsHome({
     const aiCount = templates === null ? "—" : list.filter(spec => spec.drafting_mode === "ai").length;
     const categoryCount = templates === null ? "—" : new Set(list.map(spec => spec.category).filter(Boolean)).size;
     const overview = [
-        { label: "Total templates", value: availableCount, color: "#4d7df3", bg: "#edf3ff", icon: Icon.contract },
-        { label: "AI-assisted", value: aiCount, color: "#16a45b", bg: "#eaf9f0", icon: Icon.spark },
-        { label: "Categories", value: categoryCount, color: "#9333ea", bg: "#f7efff", icon: Icon.folder },
-        { label: "Available", value: availableCount, color: "#e85d04", bg: "#fff4e8", icon: Icon.download },
+        { label: "Total templates", value: availableCount, color: "#4d7df3", bg: "#edf3ff", ink: "var(--teal-ink)", sub: "Reviewed legal builders", icon: Icon.contract },
+        { label: "AI-assisted", value: aiCount, color: "#16a45b", bg: "#eaf9f0", ink: "var(--brand-text)", sub: "AI fills them from your case", icon: Icon.spark },
+        { label: "Categories", value: categoryCount, color: "#9333ea", bg: "#f7efff", ink: "var(--c-contract)", sub: "Areas of law covered", icon: Icon.folder },
+        { label: "Available", value: availableCount, color: "#e85d04", bg: "#fff4e8", ink: "var(--gold)", sub: "Ready to draft as PDF", icon: Icon.download },
     ];
+    // On the dashboard's palette (clientTheme.js) the cards and icons take its
+    // surface and soft accents; otherwise the original colours stay.
+    const onTokens = !!t.onTokens;
 
     const use = (spec, prefill) => { setPreview(null); setCustomize(null); onUse(spec, prefill); };
     // The cards' round icon buttons.
@@ -407,9 +491,33 @@ export default function DocumentsHome({
                     <h1 style={{ margin: 0, fontFamily: SERIF, fontSize: 34, fontWeight: 600, color: t.text }}>Documents</h1>
                     <div style={{ marginTop: 4, fontSize: 14, color: t.textMuted }}>Draft with AI, start from a template, or continue your work.</div>
                 </div>
-                <Btn onClick={() => onOpenView?.("vault")}>{Icon.folder} Vault</Btn>
+                {/* `.ch-pill-solid`: the lawyer's solid pill (Appointments' Export Excel);
+                    `.ch-pill-go`: the icon in a round badge and an arrow, as a way to another page. */}
+                {onTokens ? (
+                    <Btn onClick={() => onOpenView?.("vault")} className="ch-pill-solid ch-pill-go">
+                        <span className="b" aria-hidden="true">{Icon.folder}</span>Vault
+                        <svg className="go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                    </Btn>
+                ) : (
+                    <Btn onClick={() => onOpenView?.("vault")}>{Icon.folder} Vault</Btn>
+                )}
             </div>
 
+            {onTokens ? (
+                /* The lawyer review inbox's stat cards, as the client's own copy
+                   (clientTheme.js .ch-stat): icon and label, the figure, a line
+                   saying what it counts, each in its own accent. */
+                <section aria-label="Template overview" className="ch-stats">
+                    {overview.map(item => (
+                        <div key={item.label} className="ch-stat" style={{ "--c": item.ink }}>
+                            <span className="ic" aria-hidden="true">{item.icon}</span>
+                            <span className="l">{item.label}</span>
+                            <span className="v" data-keep-font>{item.value}</span>
+                            <span className="s">{item.sub}</span>
+                        </div>
+                    ))}
+                </section>
+            ) : (
             <section aria-label="Template overview" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16 }}>
                 {overview.map(item => (
                     <Card key={item.label} style={{ minHeight: 112, padding: "20px 22px", display: "flex", alignItems: "center", gap: 16, boxSizing: "border-box", background: t.mode === "dark" ? (t.cardHi || t.card) : "#ffffff", boxShadow: t.mode === "dark" ? "none" : "0 2px 8px rgba(24, 42, 48, 0.06)" }}>
@@ -423,15 +531,17 @@ export default function DocumentsHome({
                     </Card>
                 ))}
             </section>
+            )}
 
             <section id="templates" aria-label="Document templates" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 {/* Row 1: the heading, and search on the far right. Row 2: the
                     category filters on a line of their own (2026-10-08). */}
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <h2 style={{ margin: 0, fontFamily: SERIF, fontSize: 20, fontWeight: 600, color: t.text }}>Start from a template</h2>
+                    <h2 style={{ margin: 0, fontFamily: SERIF, fontSize: 20, fontWeight: 600, color: onTokens ? "var(--brand-text)" : t.text }}>Start from a template</h2>
                     <span style={{ fontSize: 13, color: t.textMuted }}>Reviewed builders · you only fill the details</span>
                     <div style={{ flex: 1 }} />
-                    <div data-template-search style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", borderRadius: 10, border: `1px solid ${query ? t.primary : (t.inputBorder || t.border)}`, background: t.inputBg, width: "min(280px, 100%)", marginLeft: "auto" }}>
+                    {/* `.ch-search`: the lawyer Cases search's hover and focus ring. */}
+                    <div data-template-search className={onTokens ? "ch-search" : undefined} style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", borderRadius: 10, border: `1px solid ${query ? t.primary : (t.inputBorder || t.border)}`, background: t.inputBg, width: "min(280px, 100%)", marginLeft: "auto" }}>
                         <span style={{ color: t.textMuted, display: "flex" }}>{Icon.search}</span>
                         <label htmlFor="tpl-search" style={{ position: "absolute", left: -9999 }}>Search templates</label>
                         <input id="tpl-search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search templates"
@@ -440,10 +550,10 @@ export default function DocumentsHome({
                     </div>
                 </div>
                 {categories.length > 2 && (
-                    <div role="group" aria-label="Filter by category" data-category-filters style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div role="group" aria-label="Filter by category" data-category-filters style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", ...(onTokens ? { margin: "8px 0 10px" } : null) }}>
                         {categories.map(([name, count]) => (
-                            <Chip key={name} active={category === name} onClick={() => setCategory(name)}>
-                                {name}<span style={{ opacity: 0.7, fontWeight: 500 }}>{count}</span>
+                            <Chip key={name} active={category === name} onClick={() => setCategory(name)} className={onTokens ? "ch-chip" : undefined}>
+                                {name}<span className={onTokens ? "n" : undefined} style={onTokens ? undefined : { opacity: 0.7, fontWeight: 500 }}>{count}</span>
                             </Chip>
                         ))}
                     </div>
@@ -473,11 +583,11 @@ export default function DocumentsHome({
                                    name, the facts, the actions. The
                                    description is not repeated here -- it is the
                                    card's tooltip and the first line of Preview. */
-                                <Card key={spec.template_type} data-template={spec.template_type} title={spec.description}
+                                <Card key={spec.template_type} data-template={spec.template_type} title={spec.description} className={onTokens ? "ch-tcard" : undefined}
                                     style={{ display: "flex", flexDirection: "column", gap: 12, padding: 18, minHeight: 0, boxSizing: "border-box" }}>
                                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-                                        <span style={{ width: 44, height: 44, borderRadius: 12, background: tile.bg, color: tile.fg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{tile.icon}</span>
-                                        <Pill tone={mode.tone}>{mode.pill}</Pill>
+                                        <span style={{ width: 44, height: 44, borderRadius: 12, ...(onTokens ? tint(tile.ink) : { background: tile.bg, color: tile.fg }), display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{tile.icon}</span>
+                                        <Pill tone={mode.tone} style={onTokens ? (mode.tone === "info" ? tint("var(--teal-ink)") : { background: "var(--chip-n)", color: "var(--muted)" }) : undefined}>{mode.pill}</Pill>
                                     </div>
                                     <div style={{ minHeight: 64 }}>
                                         <div data-template-category style={{ fontSize: 12, fontWeight: 600, color: t.textMuted }}>{spec.category}</div>
@@ -489,12 +599,12 @@ export default function DocumentsHome({
                                     </div>
                                     <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
                                         {/* Round Edit and Preview, in that order (2026-10-08). */}
-                                        {!dedicated && <IconBtn label={`Edit ${spec.label}`} onClick={() => setCustomize(spec)} style={roundBtn}><LIcon name="squarePen" size={18} /></IconBtn>}
-                                        <IconBtn label={`Preview ${spec.label}`} onClick={() => setPreview(i)} style={roundBtn}><LIcon name="eye" size={18} /></IconBtn>
+                                        {!dedicated && <IconBtn label={`Edit ${spec.label}`} onClick={() => setCustomize(spec)} style={roundBtn} className={onTokens ? "ch-ib" : undefined}><LIcon name="squarePen" size={18} /></IconBtn>}
+                                        <IconBtn label={`Preview ${spec.label}`} onClick={() => setPreview(i)} style={roundBtn} className={onTokens ? "ch-ib" : undefined}><LIcon name="eye" size={18} /></IconBtn>
                                         {dedicated ? (
                                             <Btn href={dedicatedToolHref(spec)} style={{ flex: 1, minHeight: 38, color: t.primary }}>Open dedicated calculator</Btn>
                                         ) : (
-                                            <Btn kind="primary" onClick={() => use(spec)} style={{ flex: 1, minHeight: 38 }}>Use template</Btn>
+                                            <Btn kind="primary" className={onTokens ? "ch-card-use" : undefined} onClick={() => use(spec)} style={{ flex: 1, minHeight: 38 }}>Use template</Btn>
                                         )}
                                     </div>
                                 </Card>

@@ -1,326 +1,192 @@
 'use client';
-import React, { useState, useRef, useEffect } from "react";
-import { createPortal } from "react-dom";
+import React, { useContext, useEffect, useState } from "react";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
+import { CaseCtx } from "@/components/shared/CaseContext.jsx";
 import SessionsPanel from "@/components/shared/SessionsPanel.jsx";
-import { updateMe, changePassword, closeAccount } from "@/lib/api.js";
-import Ic from "./Ic.jsx";
-import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
+import { updateMe, changePassword, closeAccount, myDocumentsV2 } from "@/lib/api.js";
+import { useLang } from "@/lib/i18n.jsx";
+import { ThemedInput, ConfirmDialog } from "@/components/shared/shared.jsx";
+import { DOCS_FONT } from "./documents/ui.jsx";
 
-/* ─────────────────────────────────────────────────────────────
-   DESIGN TOKENS — derived from theme but boosted for contrast
-───────────────────────────────────────────────────────────── */
-const useTokens = () => {
-    const t = useT();
-    return {
-        ...t,
-        // Visible card surface — noticeably different from page bg
-        cardSurface: t.mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
-        cardBorder: t.mode === "dark" ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.10)",
-        // Icon badge — solid tinted pill
-        iconBg: t.mode === "dark" ? `${t.primary}28` : `${t.primary}18`,
-        iconBorder: t.mode === "dark" ? `${t.primary}45` : `${t.primary}30`,
-        // Divider between segments
-        divider: t.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
-        // Hover lift for stat/contact cells
-        hoverBg: t.mode === "dark" ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.04)",
-    };
-};
+/* The client Profile (2026-10-11, the approved "Profile v2" design).
+ *
+ * Everything shown is the account's own data. The page this replaces showed
+ * every client the same "Last login 2 hours ago from Pixel 6", "3 active
+ * devices", "Security score: Good" and "Member since December 2025" -- all
+ * hardcoded -- beside a real member-since date that disagreed with it, and
+ * fell back to a developer's own name and email when a field was empty. A
+ * photo "upload" only changed this browser's preview and announced success.
+ * None of that survives: sessions come from the sessions panel, the date from
+ * `created_at`, and a missing field says it is missing.
+ *
+ * Scoped by [data-profile-c]; colours are the client tokens (clientTheme.js). */
+const PROFILE_CSS = `[data-profile-c]{display:flex;flex-direction:column;gap:18px}
+[data-profile-c] .pc-card{position:relative;border-radius:20px;border:1px solid color-mix(in srgb,var(--brand-text) 14%,var(--line));background:radial-gradient(120% 110% at 100% 0%,color-mix(in srgb,var(--c,var(--brand-text)) 8%,transparent) 0%,transparent 55%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,#fff 12%),var(--surface));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),inset 0 -3px 0 rgba(0,0,0,.2),0 14px 28px -16px rgba(0,0,0,.7)}
+[data-profile-c] .pc-well{border-radius:14px;background:linear-gradient(180deg,color-mix(in srgb,var(--surface-2) 88%,#fff 4%),var(--surface-2));border:1px solid color-mix(in srgb,var(--c,var(--brand-text)) 16%,var(--line))}
+[data-profile-c] .pc-head{display:flex;align-items:center;gap:18px;padding:18px 22px}
+[data-profile-c] .pc-av{width:72px;height:72px;flex:none;border-radius:50%;display:grid;place-items:center;overflow:hidden;font-size:26px;font-weight:600;color:#04212a;background:linear-gradient(135deg,#3ee0a1,#2ec4d6);box-shadow:0 0 0 4px color-mix(in srgb,var(--brand-text) 15%,transparent)}
+[data-profile-c] .pc-av img{width:100%;height:100%;object-fit:cover}
+[data-profile-c] .pc-name{margin:0;font-size:27px;font-weight:600;color:var(--ink)}
+[data-profile-c] .pc-chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+[data-profile-c] .pc-ring{width:58px;height:58px;flex:none;border-radius:50%;display:grid;place-items:center}
+[data-profile-c] .pc-ring span{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);font-weight:800;font-size:14px;color:var(--ink)}
+[data-profile-c] .pc-tabs{display:flex;gap:6px;padding:5px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);flex:none}
+[data-profile-c] .pc-tab{height:40px;padding:0 18px;border-radius:999px;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;transition:background .2s,color .2s}
+[data-profile-c] .pc-tab:hover{color:var(--ink);background:var(--hover-tint)}
+[data-profile-c] .pc-tab[aria-selected="true"]{background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff}
+[data-profile-c] .pc-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+[data-profile-c] .pc-sec-head{padding:18px 22px 14px;border-bottom:1px solid var(--line)}
+[data-profile-c] .pc-sec-head p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
+[data-profile-c] .pc-line{display:grid;grid-template-columns:34px 150px minmax(0,1fr) auto;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);transition:background .15s}
+[data-profile-c] .pc-line:last-child{border-bottom:0}
+[data-profile-c] .pc-line:hover{background:color-mix(in srgb,var(--c) 5%,transparent)}
+[data-profile-c] .pc-line .pc-k{width:auto;font-size:13.5px;font-weight:700;letter-spacing:0;text-transform:none;color:var(--ink)}
+[data-profile-c] .pc-val{display:flex;flex-direction:column;gap:2px;min-width:0}
+[data-profile-c] .pc-v.none{font-style:italic}
+[data-profile-c] .pc-why{font-size:12px;color:var(--faint)}
+[data-profile-c] .pc-act{display:flex;gap:8px;justify-content:flex-end}
+[data-profile-c] .pc-seg{display:inline-flex;padding:3px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+[data-profile-c] .pc-seg button{height:32px;padding:0 14px;border:0;border-radius:9px;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+[data-profile-c] .pc-seg button[aria-checked="true"]{background:color-mix(in srgb,#b9a6f2 20%,var(--surface));color:var(--ink)}
+[data-profile-c] .pc-checklist{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+[data-profile-c] .pc-check-row{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);font-size:13.5px;font-weight:600;color:var(--ink)}
+[data-profile-c] .pc-check-row[data-ok]{color:var(--muted)}
+[data-profile-c] .pc-check-row .tick{width:20px;height:20px;flex:none;border-radius:50%;display:grid;place-items:center;border:1.5px dashed var(--line-strong)}
+[data-profile-c] .pc-check-row[data-ok] .tick{border:0;background:var(--brand-text);color:#04262c}
+[data-profile-c] .pc-cta{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:46px;border:0;border-radius:14px;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;font:inherit;font-size:14.5px;font-weight:700;cursor:pointer;box-shadow:0 10px 22px -12px rgba(28,156,102,.85);transition:filter .15s,transform .12s}
+[data-profile-c] .pc-cta:hover{filter:brightness(1.08)}
+[data-profile-c] .pc-cta:hover span{transform:translateX(3px)}
+[data-profile-c] .pc-cta span{transition:transform .2s}
+[data-profile-c] .pc-cta:active{transform:scale(.97)}
+[data-profile-c] .pc-quick{display:flex;flex-direction:column;padding:6px}
+[data-profile-c] .pc-quick button{display:flex;align-items:center;gap:12px;height:46px;padding:0 14px;border:0;border-radius:12px;background:transparent;color:var(--ink);font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer;transition:background .15s,color .15s}
+[data-profile-c] .pc-quick button svg{color:var(--c)}
+[data-profile-c] .pc-quick button i{margin-left:auto;font-style:normal;font-size:18px;color:var(--faint);transition:transform .2s,color .2s}
+[data-profile-c] .pc-quick button:hover{background:color-mix(in srgb,var(--c) 12%,transparent);color:var(--c)}
+[data-profile-c] .pc-quick button:hover i{transform:translateX(3px);color:var(--c)}
+[data-profile-c] .pc-col{display:flex;flex-direction:column;gap:16px;min-width:0}
+[data-profile-c] .pc-sec{padding:20px 24px}
+[data-profile-c] .pc-h{margin:0;font-size:17px;font-weight:700;color:var(--ink)}
+[data-profile-c] .pc-row{display:flex;align-items:center;gap:14px;padding:14px 4px;border-bottom:1px solid var(--line)}
+[data-profile-c] .pc-row:last-child{border-bottom:0}
+[data-profile-c] .pc-ic{width:34px;height:34px;flex:none;border-radius:10px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+[data-profile-c] .pc-k{width:130px;flex:none;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+[data-profile-c] .pc-v{flex:1;min-width:0;font-size:14.5px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+[data-profile-c] .pc-v.none{color:var(--faint);font-weight:500}
+[data-profile-c] .pc-ed{width:32px;height:32px;flex:none;border-radius:10px;border:1px solid color-mix(in srgb,var(--brand-text) 25%,transparent);background:color-mix(in srgb,var(--brand-text) 8%,transparent);color:var(--brand-text);display:grid;place-items:center;cursor:pointer;transition:background .2s,color .2s,transform .15s}
+[data-profile-c] .pc-ed:hover{background:var(--brand-text);color:#04262c}
+[data-profile-c] .pc-ed:active{transform:scale(.92)}
+[data-profile-c] .pc-input{flex:1;min-width:0;height:38px;padding:0 12px;border-radius:10px;border:1px solid var(--brand-text);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-text) 16%,transparent);background:var(--input);color:var(--ink);font:inherit;font-size:14px;outline:none}
+[data-profile-c] .pc-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;border:1px solid color-mix(in srgb,var(--a,var(--brand-text)) 38%,transparent);background:color-mix(in srgb,var(--a,var(--brand-text)) 13%,var(--surface));color:var(--a,var(--brand-text));font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:background .2s,color .2s,transform .12s}
+[data-profile-c] .pc-btn:hover:not(:disabled){background:var(--a,var(--brand-text));border-color:transparent;color:#04262c}
+[data-profile-c] .pc-btn:active:not(:disabled){transform:scale(.95)}
+[data-profile-c] .pc-btn:disabled{opacity:.55;cursor:not-allowed}
+[data-profile-c] .pc-btn.go{border:0;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff}
+[data-profile-c] .pc-btn.go:hover:not(:disabled){filter:brightness(1.08);background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff}
+[data-profile-c] .pc-link{border:0;background:none;padding:0;color:var(--brand-text);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+[data-profile-c] .pc-link:hover{text-decoration:underline}
+[data-profile-c] .pc-provs{display:flex;flex-wrap:wrap;gap:6px}
+[data-profile-c] .pc-prov{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+[data-profile-c] .pc-prov[aria-checked="true"]{border-color:var(--brand-text);background:color-mix(in srgb,var(--brand-text) 14%,var(--surface-2))}
+[data-profile-c] .pc-glance{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+[data-profile-c] .pc-glance button{display:flex;flex-direction:column;gap:4px;padding:12px;text-align:left;font:inherit;cursor:pointer;transition:transform .2s,border-color .2s}
+[data-profile-c] .pc-glance button:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--c) 50%,transparent)}
+[data-profile-c] .pc-glance b{font-size:24px;font-weight:600;color:var(--c)}
+[data-profile-c] .pc-glance span{font-size:12px;color:var(--muted)}
+[data-profile-c] .pc-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+[data-profile-c] .pc-check{padding:18px;display:flex;flex-direction:column;gap:12px}
+[data-profile-c] .pc-ic.big{width:44px;height:44px;border-radius:13px}
+@media (max-width:1100px){[data-profile-c] .pc-grid{grid-template-columns:minmax(0,1fr)}[data-profile-c] .pc-checks{grid-template-columns:minmax(0,1fr)}[data-profile-c] .pc-head{flex-wrap:wrap}[data-profile-c] .pc-line{grid-template-columns:34px minmax(0,1fr) auto}[data-profile-c] .pc-line .pc-k{display:none}}`;
 
-/* ─────────────────────────────────────────────────────────────
-   SUB-COMPONENTS
-───────────────────────────────────────────────────────────── */
-
-/** Horizontal ruled section header */
-const SectionLabel = ({ children }) => {
-    const tk = useTokens();
-    return (
-        <div style={{
-            display: "flex", alignItems: "center", gap: 10,
-            marginBottom: 14,
-        }}>
-            <div style={{ width: 3, height: 14, borderRadius: 2, background: tk.primary, flexShrink: 0 }} />
-            <span style={{
-                fontSize: 10, letterSpacing: "1.4px", textTransform: "uppercase",
-                fontWeight: 800, color: tk.primary,
-            }}>{children}</span>
-            <div style={{ flex: 1, height: 1, background: tk.divider }} />
-        </div>
-    );
-};
-
-/** Icon badge — always visible regardless of theme */
-const IconBadge = ({ icon, size = 16, color, warn }) => {
-    const tk = useTokens();
-    const c = warn ? tk.warn : (color || tk.primary);
-    return (
-        <div style={{
-            width: 38, height: 38, borderRadius: 11, flexShrink: 0,
-            background: warn
-                ? (tk.mode === "dark" ? "rgba(255,180,0,0.15)" : "rgba(200,120,0,0.10)")
-                : tk.iconBg,
-            border: `1px solid ${warn
-                ? (tk.mode === "dark" ? "rgba(255,180,0,0.30)" : "rgba(200,120,0,0.25)")
-                : tk.iconBorder}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-            <Ic n={icon} s={size} c={c} />
-        </div>
-    );
-};
-
-/** Visible field tile — solid border + subtle fill */
-const FieldTile = ({ label, value, icon }) => {
-    const tk = useTokens();
-    return (
-        <div style={{
-            padding: "14px 16px",
-            background: tk.cardSurface,
-            border: `1px solid ${tk.cardBorder}`,
-            borderRadius: 14,
-            display: "flex", alignItems: "center", gap: 12,
-            transition: "border-color 0.15s, background 0.15s",
-        }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = `${tk.primary}50`; e.currentTarget.style.background = tk.hoverBg; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = tk.cardBorder; e.currentTarget.style.background = tk.cardSurface; }}
-        >
-            <IconBadge icon={icon} size={15} />
-            <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: tk.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 14, color: tk.text, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
-            </div>
-        </div>
-    );
-};
-
-/** Stat cell inside the activity bar */
-const StatCell = ({ icon, label, value, sub, warn, last }) => {
-    const tk = useTokens();
-    return (
-        <div style={{
-            flex: 1, padding: "14px 18px",
-            borderRight: last ? "none" : `1px solid ${tk.divider}`,
-            display: "flex", alignItems: "center", gap: 12,
-            transition: "background 0.15s",
-        }}
-            onMouseEnter={e => e.currentTarget.style.background = tk.hoverBg}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-        >
-            <IconBadge icon={icon} warn={warn} />
-            <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: tk.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</div>
-                <div style={{ fontSize: 14, color: warn ? tk.warn : tk.text, fontWeight: 800, marginTop: 2 }}>{value}</div>
-                <div style={{ fontSize: 11, color: tk.textMuted, marginTop: 1 }}>{sub}</div>
-            </div>
-        </div>
-    );
-};
-
-/** Contact cell inside the contact band */
-const ContactCell = ({ icon, label, value, extra, last }) => {
-    const tk = useTokens();
-    return (
-        <div style={{
-            flex: 1, padding: "16px 18px",
-            borderRight: last ? "none" : `1px solid ${tk.divider}`,
-            display: "flex", alignItems: "flex-start", gap: 13,
-            transition: "background 0.15s",
-        }}
-            onMouseEnter={e => e.currentTarget.style.background = tk.hoverBg}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-        >
-            <IconBadge icon={icon} size={15} />
-            <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: tk.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 5 }}>{label}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: tk.text }}>{value}</div>
-                {extra && (
-                    <div
-                        style={{ fontSize: 12, color: tk.primary, fontWeight: 600, marginTop: 5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
-                        onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"}
-                        onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}
-                    >
-                        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                        {extra}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-/** Edit input field — supports both controlled (value+onChange) and uncontrolled (defaultValue) */
-const EditField = ({ label, value, onChange, icon, type = "text" }) => {
-    const tk = useTokens();
-    return (
-        <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, fontSize: 10, color: tk.textMuted, fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase" }}>
-                {icon && <Ic n={icon} s={11} c={tk.textMuted} />}
-                {label}
-            </div>
-            {onChange
-                ? <ThemedInput value={value} onChange={onChange} type={type} />
-                : <ThemedInput defaultValue={value} type={type} />
-            }
-        </div>
-    );
-};
-
-/** Security row */
-const SecurityRow = ({ icon, label, desc, danger, onClick, children }) => {
-    const tk = useTokens();
-    return (
-        <div style={{
-            display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
-            background: tk.cardSurface,
-            border: `1px solid ${danger ? `${tk.danger}35` : tk.cardBorder}`,
-            borderRadius: 14, transition: "all 0.15s",
-        }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = danger ? tk.danger : tk.primary; e.currentTarget.style.background = danger ? `${tk.danger}08` : tk.hoverBg; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = danger ? `${tk.danger}35` : tk.cardBorder; e.currentTarget.style.background = tk.cardSurface; }}
-        >
-            <div style={{
-                width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-                background: danger
-                    ? (tk.mode === "dark" ? "rgba(255,70,70,0.15)" : "rgba(200,0,0,0.08)")
-                    : tk.iconBg,
-                border: `1px solid ${danger ? `${tk.danger}35` : tk.iconBorder}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-                <Ic n={icon} s={17} c={danger ? tk.danger : tk.primary} />
-            </div>
-            <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: danger ? tk.danger : tk.text, marginBottom: 3 }}>{label}</div>
-                <div style={{ fontSize: 12, color: tk.textMuted }}>{desc}</div>
-            </div>
-            {children || (
-                <BtnOutline onClick={onClick} style={{ fontSize: 12, padding: "8px 16px", flexShrink: 0, ...(danger ? { borderColor: tk.danger, color: tk.danger } : {}) }}>
-                    {danger ? "Delete" : "Manage"}
-                </BtnOutline>
-            )}
-        </div>
-    );
-};
-
-/* ─────────────────────────────────────────────────────────────
-   HERO BG ICONS
-───────────────────────────────────────────────────────────── */
-const HeroBgIcons = ({ color }) => (
-    <svg viewBox="0 0 520 110" fill="none" xmlns="http://www.w3.org/2000/svg"
-        style={{ position: "absolute", right: 0, top: 0, height: "100%", width: "auto", opacity: 0.11, pointerEvents: "none" }}>
-        <line x1="260" y1="16" x2="260" y2="96" stroke={color} strokeWidth="2.5" />
-        <line x1="200" y1="34" x2="320" y2="34" stroke={color} strokeWidth="2.5" />
-        <path d="M200 34 L178 68 L222 68 Z" stroke={color} strokeWidth="2" fill="none" />
-        <path d="M320 34 L298 68 L342 68 Z" stroke={color} strokeWidth="2" fill="none" />
-        <line x1="235" y1="96" x2="285" y2="96" stroke={color} strokeWidth="2.5" />
-        <rect x="375" y="24" width="46" height="20" rx="5" stroke={color} strokeWidth="2" transform="rotate(-35 375 24)" />
-        <line x1="394" y1="68" x2="436" y2="98" stroke={color} strokeWidth="3" strokeLinecap="round" />
-        <rect x="68" y="36" width="50" height="58" rx="3" stroke={color} strokeWidth="2" />
-        <line x1="93" y1="36" x2="93" y2="94" stroke={color} strokeWidth="1.5" />
-        <line x1="76" y1="50" x2="91" y2="50" stroke={color} strokeWidth="1.5" />
-        <line x1="76" y1="60" x2="91" y2="60" stroke={color} strokeWidth="1.5" />
-        <line x1="76" y1="70" x2="91" y2="70" stroke={color} strokeWidth="1.5" />
-        <path d="M450 18 L492 27 L492 60 C492 79 471 91 450 96 C429 91 408 79 408 60 L408 27 Z" stroke={color} strokeWidth="2" fill="none" />
-        <path d="M436 54 L447 65 L466 43" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        <rect x="138" y="28" width="46" height="58" rx="4" stroke={color} strokeWidth="2" />
-        <line x1="149" y1="44" x2="175" y2="44" stroke={color} strokeWidth="1.5" />
-        <line x1="149" y1="53" x2="175" y2="53" stroke={color} strokeWidth="1.5" />
-        <line x1="149" y1="62" x2="170" y2="62" stroke={color} strokeWidth="1.5" />
-        <line x1="149" y1="71" x2="175" y2="71" stroke={color} strokeWidth="1.5" />
-    </svg>
-);
-
-const PROVINCE_OPTIONS = [
-    { value: "punjab", label: "Punjab", sub: "Lahore · Rawalpindi · Faisalabad", flag: "🌾" },
-    { value: "sindh", label: "Sindh", sub: "Karachi · Hyderabad · Sukkur", flag: "🌊" },
-    { value: "kpk", label: "KPK", sub: "Peshawar · Abbottabad · Mardan", flag: "⛰️" },
-    { value: "balochistan", label: "Balochistan", sub: "Quetta · Gwadar · Turbat", flag: "🏜️" },
-    { value: "federal", label: "Federal (ICT)", sub: "Islamabad Capital Territory", flag: "🏛️" },
+const PROVINCES = [
+    ["punjab", "Punjab"], ["sindh", "Sindh"], ["kpk", "Khyber Pakhtunkhwa"],
+    ["balochistan", "Balochistan"], ["federal", "Islamabad (Federal)"],
 ];
+const provinceName = (v) => (PROVINCES.find(p => p[0] === v) || [null, ""])[1];
 
-/* ══════════════════════════════════════════════════════════════
-   MODULE: PROFILE
-══════════════════════════════════════════════════════════════ */
+const Svg = ({ d, s = 16, w = 2 }) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+);
+const I = {
+    user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+    mail: "M4 6h16v12H4zM4 7l8 6 8-6",
+    phone: "M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7l.7 2.8-1.8 2.4a16 16 0 0 0 6 6l2.4-1.8 2.8.7a2 2 0 0 1 1.7 2z",
+    pin: "M12 21s6.5-5.6 6.5-11a6.5 6.5 0 1 0-13 0c0 5.4 6.5 11 6.5 11zM12 12.3a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6z",
+    lang: "M4 5h7M8 3v2M5 9c1.5 3 4 5 6 6M11 5c-1 4-3 7-6 9M13 21l4-10 4 10M14.5 17h5",
+    pen: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+    check: "M20 6 9 17l-5-5",
+    x: "M6 6l12 12M18 6 6 18",
+    lock: "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4",
+    shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4",
+    trash: "M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14",
+    plus: "M12 5v14M5 12h14",
+    help: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01",
+    out: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
+};
+
 const ModProfile = () => {
-    const tk = useTokens();
     const t = useT();
     const toast = useToast();
     const { user, updateUser, logout } = useAuth();
-    const [sessionsOpen, setSessionsOpen] = useState(false);
-    const [edit, setEdit] = useState(false);
+    const { lang, toggleLang } = useLang();
+    // The profile can render outside the dashboard's case provider (tests,
+    // standalone), so it reads the context without requiring it.
+    const caseCtx = useContext(CaseCtx);
+    const [tab, setTab] = useState("personal");
+    const [editing, setEditing] = useState(null);      // "full_name" | "phone" | "province"
+    const [draft, setDraft] = useState("");
+    const [saving, setSaving] = useState(false);
     const [pwdMode, setPwdMode] = useState(false);
+    const [pwdData, setPwdData] = useState({ current: "", next: "", confirm: "" });
     const [delConfirm, setDelConfirm] = useState(false);
     const [delPassword, setDelPassword] = useState("");
-    const [closing, setClosing] = useState(false);
-    const [twoFAEnabled, setTwoFAEnabled] = useState(false);
-    const [activeTab, setActiveTab] = useState("profile");
-    const [avatarHover, setAvatarHover] = useState(false);
-    const [photoSrc, setPhotoSrc] = useState(null);
-    const [saving, setSaving] = useState(false);
-    const [editData, setEditData] = useState({ full_name: "", phone: "", province: "" });
-    const [pwdData, setPwdData] = useState({ current: "", next: "", confirm: "" });
-    const [provinceOpen, setProvinceOpen] = useState(false);
-    const [provinceRect, setProvinceRect] = useState(null);
-    const [dropUp, setDropUp] = useState(false);
-    const provinceButtonRef = useRef(null);
-    const provinceDropRef = useRef(null);
+    const [docCount, setDocCount] = useState(null);
 
     useEffect(() => {
-        if (!provinceOpen) return;
-        const handler = (e) => {
-            if (
-                !provinceButtonRef.current?.contains(e.target) &&
-                !provinceDropRef.current?.contains(e.target)
-            ) setProvinceOpen(false);
-        };
-        document.addEventListener("mousedown", handler);
-        document.addEventListener("touchstart", handler);
-        return () => {
-            document.removeEventListener("mousedown", handler);
-            document.removeEventListener("touchstart", handler);
-        };
-    }, [provinceOpen]);
-    const fileInputRef = useRef(null);
+        let live = true;
+        Promise.resolve(myDocumentsV2({ limit: 25 })).then(res => {
+            if (!live || res?.error) return;
+            const items = res?.data?.items;
+            if (Array.isArray(items)) setDocCount(`${items.length}${res.data.next_cursor ? "+" : ""}`);
+        }).catch(() => {});
+        return () => { live = false; };
+    }, []);
 
-    const displayName = user?.full_name || "Muhammad Usama";
-    const displayEmail = user?.email || "musamahoy@gmail.com";
-    const displayPhone = user?.phone || "+92 300 0000000";
-    const displayAddress = user?.province
-        ? `${user.province.charAt(0).toUpperCase() + user.province.slice(1)}, Pakistan`
-        : "Rawalpindi, Punjab, PK";
-    const initials = displayName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "MU";
+    const name = (user?.full_name || "").trim();
+    const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
+    const roleName = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "Client";
+    const memberSince = user?.created_at
+        ? new Date(user.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+        : "";
 
-    const handlePhotoChange = (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => { setPhotoSrc(ev.target.result); toast.show("Profile photo updated!", "success"); };
-        reader.readAsDataURL(file);
+    // What a complete profile has, from the fields the account really holds.
+    const checklist = [
+        ["full_name", "your name", Boolean(name)],
+        ["email", "an email", Boolean(user?.email)],
+        ["phone", "a phone number", Boolean(user?.phone)],
+        ["province", "your province", Boolean(user?.province)],
+    ];
+    const done = checklist.filter(c => c[2]).length;
+    const pct = Math.round((done / checklist.length) * 100);
+    const missing = checklist.find(c => !c[2]);
+
+    const startEdit = (key) => {
+        setEditing(key);
+        setDraft(key === "full_name" ? name : (user?.[key] || ""));
     };
-
-    const startEdit = () => {
-        setEditData({
-            full_name: displayName,
-            phone: user?.phone || "",
-            province: user?.province || "",
-        });
-        setEdit(true);
-    };
-
-    const handleSave = async () => {
+    const saveField = async (key, value) => {
+        const v = String(value ?? "").trim();
+        if (key === "full_name" && !v) { toast.show("Your name cannot be empty.", "warn", 2500); return; }
         setSaving(true);
-        const payload = { full_name: editData.full_name, phone: editData.phone };
-        if (editData.province) payload.province = editData.province;
+        const payload = { [key]: v };
         const { error } = await updateMe(payload);
-        if (error) {
-            toast.show(error.message || "Failed to save profile. Please try again.", "error");
-        } else {
-            updateUser(payload);
-            toast.show("Profile updated successfully!", "success");
-            setEdit(false);
-        }
         setSaving(false);
+        if (error) { toast.show(error.message || "Could not save. Please try again.", "error"); return; }
+        updateUser(payload);
+        setEditing(null);
+        toast.show("Saved.", "success", 2000);
     };
 
     const handlePasswordUpdate = async () => {
@@ -340,22 +206,16 @@ const ModProfile = () => {
         }
         setSaving(false);
     };
-    // Closure is irreversible, so the password is re-checked server-side. This
-    // used to announce "Your account has been deleted" on a two-second timer and
-    // call nothing at all — name, email, phone, case and payment records all
-    // stayed exactly where they were.
+
+    // Closure is irreversible, so the password is re-checked server-side, and
+    // the server's own reason for refusing (open engagements, payments) is
+    // shown as it said it.
     const handleDeleteConfirm = async () => {
         setDelConfirm(false);
         if (!delPassword.trim()) { toast.show("Enter your password to confirm", "warn"); return; }
-        setClosing(true);
         const { data, error } = await closeAccount(delPassword);
-        setClosing(false);
         setDelPassword("");
         if (error || !data?.closed) {
-            // The server refuses while engagements or payments are live and says
-            // which — surface that verbatim rather than a generic failure.
-            // `.message` is the formatted string. `.detail` is undefined on the
-            // error envelope (so the reason was lost) and an array on a 422.
             toast.show(error?.message || data?.error || "Could not close the account", "danger");
             return;
         }
@@ -366,407 +226,242 @@ const ModProfile = () => {
         }, 1500);
     };
 
+    const go = (path) => { if (typeof window !== "undefined") window.location.assign(path); };
+    const cases = caseCtx?.cases || [];
+    const apptTotal = Number.isInteger(caseCtx?.appointmentsTotal) ? caseCtx.appointmentsTotal : (caseCtx?.appointments || []).length;
+
+    const rows = [
+        { key: "full_name", k: "Full name", v: name, icon: I.user, c: "var(--brand-text)", empty: "Not added", why: "As on your CNIC — used on your documents" },
+        { key: "email", k: "Email", v: user?.email || "", icon: I.mail, c: "#6addeb", empty: "Not added", why: "Used to sign in · change it in Security" },
+        { key: "phone", k: "Phone", v: user?.phone || "", icon: I.phone, c: "var(--gold)", type: "tel", empty: "Not added", why: "So your lawyer can call you" },
+        { key: "province", k: "Province", v: provinceName(user?.province), icon: I.pin, c: "#5ad69a", empty: "Not chosen", why: "Decides which laws apply and which lawyers we suggest" },
+    ];
+
     return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div data-profile-c>
+            <style>{PROFILE_CSS}</style>
             <ConfirmDialog isOpen={delConfirm} isDanger title="Close your account?"
                 message={"This cannot be undone. Your personal details are erased and you are signed out everywhere. Case, payment and audit records are kept where the law or another party's rights require it. Enter your password below to confirm."}
                 onConfirm={handleDeleteConfirm} onCancel={() => { setDelConfirm(false); setDelPassword(""); }}>
                 <ThemedInput type="password" value={delPassword} autoComplete="current-password"
                     onChange={e => setDelPassword(e.target.value)} placeholder="Your password" />
             </ConfirmDialog>
-            <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoChange} />
 
-            {/* ══ HERO CARD ════════════════════════════════════════════ */}
-            <Card style={{ padding: 0, overflow: "hidden", border: `1px solid ${tk.cardBorder}` }}>
-
-                {/* Banner */}
-                <div style={{
-                    height: 108,
-                    background: `linear-gradient(120deg, ${t.primary}28 0%, ${t.primaryGlow} 55%, ${t.primary}10 100%)`,
-                    position: "relative", overflow: "hidden",
-                }}>
-                    <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.18 }}>
-                        <defs>
-                            <pattern id="pgrid" x="0" y="0" width="22" height="22" patternUnits="userSpaceOnUse">
-                                <circle cx="2" cy="2" r="1" fill={t.primary} />
-                            </pattern>
-                        </defs>
-                        <rect width="100%" height="100%" fill="url(#pgrid)" />
-                    </svg>
-                    <HeroBgIcons color={t.primary} />
+            <section className="pc-card pc-head">
+                <div className="pc-av" style={{ fontFamily: DOCS_FONT }}>
+                    {user?.avatar_url ? <img src={user.avatar_url} alt="" /> : initials}
                 </div>
-
-                <div style={{ padding: "0 28px 28px" }}>
-
-                    {/* Avatar + name row */}
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: 20, marginTop: -46, marginBottom: 22 }}>
-
-                        {/* Circular photo */}
-                        <div style={{ position: "relative", flexShrink: 0, cursor: "pointer" }}
-                            onMouseEnter={() => setAvatarHover(true)}
-                            onMouseLeave={() => setAvatarHover(false)}
-                            onClick={() => fileInputRef.current?.click()}
-                        >
-                            <div style={{
-                                width: 92, height: 92, borderRadius: "50%", padding: 3,
-                                background: `linear-gradient(145deg, ${t.primary}, ${t.primary}55)`,
-                                boxShadow: `0 8px 28px ${t.primary}45`,
-                            }}>
-                                <div style={{
-                                    width: "100%", height: "100%", borderRadius: "50%",
-                                    border: `3px solid ${t.card}`,
-                                    overflow: "hidden",
-                                    background: photoSrc ? "transparent" : t.grad1,
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    fontSize: 26, fontWeight: 900,
-                                    color: t.mode === "dark" ? "#1A2E35" : "#fff",
-                                    position: "relative",
-                                }}>
-                                    {photoSrc
-                                        ? <img src={photoSrc} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                        : initials
-                                    }
-                                    <div style={{
-                                        position: "absolute", inset: 0, borderRadius: "50%",
-                                        background: "rgba(0,0,0,0.52)",
-                                        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
-                                        opacity: avatarHover ? 1 : 0, transition: "opacity 0.18s",
-                                    }}>
-                                        <Ic n="edit" s={16} c="#fff" />
-                                        <span style={{ fontSize: 9, color: "#fff", fontWeight: 800, letterSpacing: "0.7px" }}>UPLOAD</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style={{
-                                position: "absolute", bottom: 4, right: 4,
-                                width: 16, height: 16, borderRadius: "50%",
-                                background: t.success, border: `2.5px solid ${t.card}`,
-                                boxShadow: `0 0 0 2px ${t.success}35`,
-                            }} />
-                        </div>
-
-                        {/* Name + meta */}
-                        <div style={{ flex: 1, paddingBottom: 6 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                                <h2 style={{ fontSize: 22, fontWeight: 900, color: t.text, margin: 0, fontFamily: "'Playfair Display', serif", letterSpacing: "-0.3px" }}>
-                                    {displayName}
-                                </h2>
-                                <Badge type="primary" style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px" }}>
-                                    {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "Client"}
-                                </Badge>
-                                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: t.success, fontWeight: 600 }}>
-                                    <Ic n="check" s={12} c={t.success} /> Verified
-                                </div>
-                            </div>
-                            <div style={{ fontSize: 12, color: t.textMuted, marginTop: 5 }}>
-                                {displayEmail} · Member since {user?.created_at
-                                    ? new Date(user.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
-                                    : "December 2025"}
-                            </div>
-                        </div>
-
-                        {/* CTA */}
-                        <div style={{ display: "flex", gap: 8, paddingBottom: 6 }}>
-                            {!edit ? (
-                                <BtnOutline onClick={startEdit} style={{ fontSize: 13, padding: "10px 20px" }}>
-                                    <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                        <Ic n="edit" s={13} c={t.primary} /> Edit Profile
-                                    </span>
-                                </BtnOutline>
-                            ) : (
-                                <>
-                                    <BtnOutline onClick={() => setEdit(false)} disabled={saving} style={{ fontSize: 13, padding: "10px 18px" }}>Cancel</BtnOutline>
-                                    <BtnPrimary onClick={handleSave} disabled={saving} style={{ fontSize: 13, padding: "10px 20px", opacity: saving ? 0.7 : 1 }}>
-                                        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                            <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} />
-                                            {saving ? "Saving…" : "Save Changes"}
-                                        </span>
-                                    </BtnPrimary>
-                                </>
-                            )}
-                        </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h1 className="pc-name" style={{ fontFamily: DOCS_FONT }}>{name || "Your name is not set"}</h1>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                        <span className="pc-chip" style={{ "--c": "var(--brand-text)" }}>{roleName}</span>
+                        {memberSince && <span style={{ fontSize: 13, color: "var(--muted)" }}>Member since {memberSince}</span>}
+                        <span style={{ fontSize: 13, color: "var(--faint)" }} aria-hidden="true">•</span>
+                        {user?.province
+                            ? <span style={{ fontSize: 13, color: "var(--muted)" }}>{provinceName(user.province)}</span>
+                            : <span style={{ fontSize: 13, color: "var(--gold)" }}>Province not set</span>}
                     </div>
+                </div>
+                <div className="pc-tabs" role="tablist" aria-label="Profile sections">
+                    {[["personal", "Personal"], ["security", "Security"]].map(([id, label]) => (
+                        <button key={id} type="button" role="tab" className="pc-tab" aria-selected={tab === id}
+                            onClick={() => { setTab(id); setEditing(null); setPwdMode(false); }}>{label}</button>
+                    ))}
+                </div>
+            </section>
 
-                    {/* ── Account Activity Bar ─────────────────────────── */}
-                    <div style={{
-                        display: "flex", borderRadius: 16,
-                        border: `1px solid ${tk.cardBorder}`,
-                        background: tk.cardSurface,
-                        overflow: "hidden", marginBottom: 24,
-                    }}>
-                        <StatCell icon="log-in" label="Last Login" value="2 hours ago" sub={'from "Pixel 6"'} />
-                        <StatCell icon="monitor" label="Connected Devices" value="3 active" sub="manage sessions" />
-                        <StatCell icon="clock" label="Member Since" value="December 2025" sub="3 months ago" />
-                        <StatCell icon="shield" label="Security Score" value="Good" sub="2FA not enabled" warn last />
-                    </div>
-
-                    {/* ── Tabs ─────────────────────────────────────────── */}
-                    <div style={{ display: "flex", borderBottom: `1px solid ${tk.divider}`, marginBottom: 24 }}>
-                        {[["profile", "user", "Profile Info"], ["security", "shield", "Security"]].map(([id, icon, label]) => (
-                            <button key={id} onClick={() => { setActiveTab(id); setEdit(false); setPwdMode(false); }} style={{
-                                display: "flex", alignItems: "center", gap: 7,
-                                padding: "10px 20px", fontSize: 13, fontWeight: 600,
-                                background: "none", border: "none", cursor: "pointer",
-                                color: activeTab === id ? t.primary : t.textMuted,
-                                borderBottom: `2px solid ${activeTab === id ? t.primary : "transparent"}`,
-                                marginBottom: -1, transition: "all 0.15s",
-                                fontFamily: "'Inter', sans-serif",
-                            }}>
-                                <Ic n={icon} s={14} c={activeTab === id ? t.primary : t.textMuted} />
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* ══ PROFILE INFO TAB ══════════════════════════════ */}
-                    {activeTab === "profile" && !edit && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-
-                            {/* Contact band */}
-                            <div>
-                                <SectionLabel>Contact Information</SectionLabel>
-                                <div style={{
-                                    display: "flex",
-                                    border: `1px solid ${tk.cardBorder}`,
-                                    borderRadius: 16,
-                                    background: tk.cardSurface,
-                                    overflow: "hidden",
-                                }}>
-                                    <ContactCell icon="mail" label="Primary Email" value={displayEmail} extra="Add Recovery Email" />
-                                    <ContactCell icon="phone" label="Phone" value={displayPhone} />
-                                    <ContactCell icon="map" label="Location" value={displayAddress} last />
-                                </div>
-                            </div>
-
-                            {/* Personal details grid */}
-                            <div>
-                                <SectionLabel>Personal Details</SectionLabel>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-                                    <FieldTile label="First Name" value={displayName.split(" ")[0] || displayName} icon="user" />
-                                    <FieldTile label="Last Name" value={displayName.split(" ").slice(1).join(" ") || "—"} icon="user" />
-                                    <FieldTile label="Member Since" value={user?.created_at
-                                        ? new Date(user.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
-                                        : "December 2025"} icon="clock" />
-                                    <FieldTile label="Account Type" value={user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "Free Client"} icon="briefcase" />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ══ EDIT MODE ═════════════════════════════════════ */}
-                    {activeTab === "profile" && edit && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-                            <div>
-                                <SectionLabel>Contact Information</SectionLabel>
-                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                    <div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, fontSize: 10, color: tk.textMuted, fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase" }}>
-                                            <Ic n="mail" s={11} c={tk.textMuted} />
-                                            Email (cannot be changed)
-                                        </div>
-                                        <ThemedInput value={displayEmail} disabled type="email" style={{ opacity: 0.55, cursor: "not-allowed" }} />
-                                    </div>
-                                    <EditField
-                                        label="Phone"
-                                        value={editData.phone}
-                                        onChange={e => setEditData(d => ({ ...d, phone: e.target.value }))}
-                                        icon="phone"
-                                        type="tel"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <SectionLabel>Personal Details</SectionLabel>
-                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                    <EditField
-                                        label="Full Name"
-                                        value={editData.full_name}
-                                        onChange={e => setEditData(d => ({ ...d, full_name: e.target.value }))}
-                                        icon="user"
-                                    />
-                                    <div style={{ position: "relative" }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, fontSize: 10, color: tk.textMuted, fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase" }}>
-                                            <Ic n="map" s={11} c={tk.textMuted} />
-                                            Province
-                                        </div>
-
-                                        {/* Trigger button */}
-                                        <button
-                                            ref={provinceButtonRef}
-                                            type="button"
-                                            onClick={() => {
-                                                if (provinceButtonRef.current) {
-                                                    const r = provinceButtonRef.current.getBoundingClientRect();
-                                                    const dropdownHeight = 280;
-                                                    const dropdownWidth = Math.max(r.width, 280);
-                                                    const spaceBelow = window.innerHeight - r.bottom;
-                                                    const spaceRight = window.innerWidth - r.right;
-                                                    const shouldDropUp = spaceBelow < dropdownHeight + 20;
-                                                    const shouldAlignRight = spaceRight < dropdownWidth + 20;
-
-                                                    setDropUp(shouldDropUp);
-                                                    setProvinceRect({
-                                                        top: shouldDropUp ? r.top - dropdownHeight - 6 : r.bottom + 6,
-                                                        left: shouldAlignRight ? r.right - dropdownWidth : r.left,
-                                                        width: dropdownWidth,
-                                                    });
-                                                }
-                                                setProvinceOpen(v => !v);
-                                            }}
-                                            style={{
-                                                width: "100%", padding: "10px 14px", borderRadius: 8,
-                                                border: `1.5px solid ${provinceOpen ? tk.primary : tk.cardBorder}`,
-                                                background: tk.inputBg, color: editData.province ? tk.text : tk.textMuted,
-                                                fontSize: 13, outline: "none", cursor: "pointer", fontFamily: "inherit",
-                                                display: "flex", alignItems: "center", gap: 8,
-                                                transition: "border-color 0.15s, box-shadow 0.15s",
-                                                boxShadow: provinceOpen ? `0 0 0 3px ${tk.primary}20` : "none",
-                                            }}
-                                        >
-                                            {editData.province ? (
-                                                <>
-                                                    <span style={{ fontSize: 16, lineHeight: 1 }}>
-                                                        {PROVINCE_OPTIONS.find(p => p.value === editData.province)?.flag}
-                                                    </span>
-                                                    <span style={{ flex: 1, fontWeight: 600, textAlign: "left" }}>
-                                                        {PROVINCE_OPTIONS.find(p => p.value === editData.province)?.label}
-                                                    </span>
-                                                </>
+            {tab === "personal" && (
+                <div className="pc-grid">
+                    <div className="pc-col">
+                        <section className="pc-card" style={{ overflow: "hidden" }}>
+                            <header className="pc-sec-head">
+                                <h2 className="pc-h">Personal details</h2>
+                                <p>Lawyers you send a case to see your name and phone.</p>
+                            </header>
+                            {rows.map(r => (
+                                <div key={r.key} className="pc-line" style={{ "--c": r.c }}>
+                                    <span className="pc-ic"><Svg d={r.icon} /></span>
+                                    <span className="pc-k">{r.k}</span>
+                                    {editing === r.key ? (
+                                        <span className="pc-val">
+                                            {r.key === "province" ? (
+                                                <span className="pc-provs" role="radiogroup" aria-label="Province">
+                                                    {PROVINCES.map(([v, label]) => (
+                                                        <button key={v} type="button" role="radio" aria-checked={draft === v} className="pc-prov" onClick={() => setDraft(v)}>{label}</button>
+                                                    ))}
+                                                </span>
                                             ) : (
-                                                <span style={{ flex: 1, textAlign: "left" }}>— Select province —</span>
+                                                <input className="pc-input" type={r.type || "text"} value={draft} autoFocus aria-label={r.k}
+                                                    onChange={e => setDraft(e.target.value)}
+                                                    onKeyDown={e => { if (e.key === "Enter") saveField(r.key, draft); if (e.key === "Escape") setEditing(null); }} />
                                             )}
-                                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                                                style={{ flexShrink: 0, transition: "transform 0.2s", transform: provinceOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
-                                                <polyline points="6 9 12 15 18 9" />
-                                            </svg>
-                                        </button>
-
-                                        {/* Portal — renders into document.body, bypasses all overflow:hidden and CSS transforms */}
-                                        {provinceOpen && provinceRect && createPortal(
-                                            <>
-                                                <style>{`
-                                                    @keyframes fadeInDown {
-                                                        from { opacity: 0; transform: translateY(-4px); }
-                                                        to { opacity: 1; transform: translateY(0); }
-                                                    }
-                                                    @keyframes fadeInUp {
-                                                        from { opacity: 0; transform: translateY(4px); }
-                                                        to { opacity: 1; transform: translateY(0); }
-                                                    }
-                                                `}</style>
-                                                <div
-                                                    ref={provinceDropRef}
-                                                    style={{
-                                                        position: "fixed",
-                                                        top: provinceRect.top,
-                                                        left: provinceRect.left,
-                                                        width: provinceRect.width,
-                                                        maxHeight: 320,
-                                                        zIndex: 9999,
-                                                        background: tk.card, border: `1.5px solid ${tk.primary}40`, borderRadius: 12,
-                                                        boxShadow: `0 12px 40px rgba(0,0,0,0.22)`, overflow: "hidden",
-                                                        overflowY: "auto",
-                                                        animation: dropUp ? "fadeInUp 0.15s ease-out" : "fadeInDown 0.15s ease-out",
-                                                    }}>
-                                                    {PROVINCE_OPTIONS.map((p, i) => {
-                                                        const selected = editData.province === p.value;
-                                                        return (
-                                                            <div
-                                                                key={p.value}
-                                                                onClick={() => { setEditData(d => ({ ...d, province: p.value })); setProvinceOpen(false); }}
-                                                                style={{
-                                                                    display: "flex", alignItems: "center", gap: 12,
-                                                                    padding: "11px 14px", cursor: "pointer",
-                                                                    borderBottom: i < PROVINCE_OPTIONS.length - 1 ? `1px solid ${tk.divider}` : "none",
-                                                                    background: selected ? `${tk.primary}14` : "transparent",
-                                                                    transition: "background 0.12s",
-                                                                }}
-                                                                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = tk.hoverBg; }}
-                                                                onMouseLeave={e => { if (!selected) e.currentTarget.style.background = selected ? `${tk.primary}14` : "transparent"; }}
-                                                            >
-                                                                <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>{p.flag}</span>
-                                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                                    <div style={{ fontSize: 13, fontWeight: 700, color: selected ? tk.primary : tk.text }}>{p.label}</div>
-                                                                    <div style={{ fontSize: 11, color: tk.textMuted, marginTop: 1 }}>{p.sub}</div>
-                                                                </div>
-                                                                {selected && (
-                                                                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={tk.primary} strokeWidth="2.5">
-                                                                        <polyline points="20 6 9 17 4 12" />
-                                                                    </svg>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </>,
-                                            document.body
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* ══ SECURITY TAB ══════════════════════════════════ */}
-                    {activeTab === "security" && (
-                        pwdMode ? (
-                            <div>
-                                <SectionLabel>Change Password</SectionLabel>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 420, marginBottom: 16 }}>
-                                    <EditField label="Current Password" value={pwdData.current} onChange={e => setPwdData(d => ({ ...d, current: e.target.value }))} icon="lock" type="password" />
-                                    <EditField label="New Password" value={pwdData.next} onChange={e => setPwdData(d => ({ ...d, next: e.target.value }))} icon="lock" type="password" />
-                                    <EditField label="Confirm New Password" value={pwdData.confirm} onChange={e => setPwdData(d => ({ ...d, confirm: e.target.value }))} icon="lock" type="password" />
-                                </div>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                    <BtnPrimary onClick={handlePasswordUpdate} disabled={saving} style={{ fontSize: 13, padding: "12px 22px", opacity: saving ? 0.7 : 1 }}>
-                                        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                            <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> {saving ? "Updating…" : "Update Password"}
                                         </span>
-                                    </BtnPrimary>
-                                    <BtnOutline onClick={() => { setPwdMode(false); setPwdData({ current: "", next: "", confirm: "" }); }} disabled={saving} style={{ fontSize: 13, padding: "12px 22px" }}>Cancel</BtnOutline>
+                                    ) : (
+                                        <span className="pc-val">
+                                            <span className={r.v ? "pc-v" : "pc-v none"}>{r.v || r.empty}</span>
+                                            <span className="pc-why">{r.why}</span>
+                                        </span>
+                                    )}
+                                    <span className="pc-act">
+                                        {editing === r.key ? (<>
+                                            <button type="button" className="pc-btn go" disabled={saving || (r.key === "province" && !draft)} onClick={() => saveField(r.key, draft)}>{saving ? "Saving…" : "Save"}</button>
+                                            <button type="button" className="pc-btn" style={{ "--a": "var(--muted)" }} onClick={() => setEditing(null)}>Cancel</button>
+                                        </>) : r.key === "email" ? (
+                                            <button type="button" className="pc-btn" style={{ "--a": "#6addeb" }} onClick={() => setTab("security")}>Manage</button>
+                                        ) : r.v ? (
+                                            <button type="button" className="pc-btn" style={{ "--a": "var(--muted)" }} onClick={() => startEdit(r.key)}><Svg d={I.pen} s={13} w={2.2} />Edit</button>
+                                        ) : (
+                                            <button type="button" className="pc-btn" style={{ "--a": "var(--brand-text)" }} onClick={() => startEdit(r.key)}>+ Add</button>
+                                        )}
+                                    </span>
+                                </div>
+                            ))}
+                        </section>
+
+                        <section className="pc-card" style={{ overflow: "hidden" }}>
+                            <header className="pc-sec-head">
+                                <h2 className="pc-h">Preferences</h2>
+                                <p>How Attorney.AI talks to you.</p>
+                            </header>
+                            <div className="pc-line" style={{ "--c": "#b9a6f2" }}>
+                                <span className="pc-ic"><Svg d={I.lang} /></span>
+                                <span className="pc-k">Language</span>
+                                <span className="pc-val">
+                                    <span className="pc-v">{lang === "ur" ? "اردو" : "English"}</span>
+                                    <span className="pc-why">Menus and screens across the app</span>
+                                </span>
+                                <span className="pc-act">
+                                    <span className="pc-seg" role="radiogroup" aria-label="Language">
+                                        <button type="button" role="radio" aria-checked={lang !== "ur"} onClick={() => { if (lang === "ur") toggleLang?.(); }}>English</button>
+                                        <button type="button" role="radio" aria-checked={lang === "ur"} onClick={() => { if (lang !== "ur") toggleLang?.(); }}>اردو</button>
+                                    </span>
+                                </span>
+                            </div>
+                        </section>
+                    </div>
+
+                    <aside className="pc-col">
+                        <section className="pc-card pc-sec">
+                            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                <div className="pc-ring" style={{ background: `conic-gradient(var(--brand-text) 0 ${pct}%, var(--line) ${pct}% 100%)` }}>
+                                    <span>{pct}%</span>
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>{missing ? "Finish your profile" : "Profile complete"}</div>
+                                    <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{done} of {checklist.length} done{missing ? " · takes a minute" : ""}</div>
                                 </div>
                             </div>
-                        ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                                <SectionLabel>Account Security</SectionLabel>
-                                <SecurityRow icon="lock" label="Password" desc="Last changed: December 2025 · Use a strong, unique password" onClick={() => setPwdMode(true)} />
-                                <SecurityRow icon="shield" label="Two-Factor Authentication" desc={twoFAEnabled ? "2FA is active — your account is extra secure" : "Add a second layer of protection to your account"}>
-                                    <button onClick={() => toast.show("Two-factor authentication is not available yet — we will not pretend it is protecting your account.", "info", 5000)} style={{
-                                        padding: "8px 18px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-                                        border: `1.5px solid ${twoFAEnabled ? t.success : t.primary}`,
-                                        background: twoFAEnabled
-                                            ? (t.mode === "dark" ? "rgba(0,200,100,0.14)" : "rgba(0,160,80,0.09)")
-                                            : t.primaryGlow,
-                                        color: twoFAEnabled ? t.success : t.primary,
-                                        cursor: "pointer", transition: "all 0.15s", flexShrink: 0,
-                                        fontFamily: "'Inter', sans-serif",
-                                    }}>
-                                        {"Not available"}
-                                    </button>
-                                </SecurityRow>
-                                {/* Was a placeholder that toasted "coming soon". The endpoints
-                                    existed the whole time; only the UI was missing. */}
-                                <SecurityRow
-                                    icon="monitor"
-                                    label="Active Sessions"
-                                    desc="See every device signed in, and end any you do not recognise"
-                                    onClick={() => setSessionsOpen(v => !v)}
-                                />
-                                {sessionsOpen && (
-                                    <div style={{ padding: "14px 16px", background: t.cardSurface, border: `1px solid ${t.cardBorder}`, borderRadius: 14 }}>
-                                        <SessionsPanel t={t} onSignedOut={logout} />
+                            <div className="pc-checklist">
+                                {checklist.map(([key, label, ok]) => (
+                                    <div key={key} className="pc-check-row" data-ok={ok ? "" : undefined}>
+                                        <span className="tick" aria-hidden="true">{ok && <Svg d={I.check} s={11} w={3} />}</span>
+                                        <span style={{ flex: 1, textTransform: "capitalize" }}>{label.replace(/^(your|a|an) /, "")}</span>
+                                        {!ok && key !== "email" && <button type="button" className="pc-link" onClick={() => startEdit(key)}>Add</button>}
                                     </div>
-                                )}
-                                <div style={{ marginTop: 8 }}>
-                                    <SectionLabel>Danger Zone</SectionLabel>
-                                    <SecurityRow icon="trash" label="Delete Account" desc="Permanently delete your account and all associated data" danger onClick={() => setDelConfirm(true)} />
-                                </div>
+                                ))}
                             </div>
-                        )
+                            {missing && missing[0] !== "email" && (
+                                <button type="button" className="pc-cta" onClick={() => startEdit(missing[0])}>
+                                    Add {missing[1].replace(/^(your|a|an) /, "")} <span aria-hidden="true">→</span>
+                                </button>
+                            )}
+                        </section>
+
+                        {caseCtx && (
+                            <section className="pc-card pc-sec">
+                                <h2 className="pc-h" style={{ marginBottom: 12 }}>Your account at a glance</h2>
+                                <div className="pc-glance">
+                                    {[[cases.length, cases.length === 1 ? "Case" : "Cases", "var(--brand-text)", "/tracking"],
+                                      [apptTotal, apptTotal === 1 ? "Appointment" : "Appointments", "#6addeb", "/tracking"],
+                                      [docCount ?? "—", docCount === "1" ? "Document" : "Documents", "#b9a6f2", "/documents"]].map(([n, label, c, path]) => (
+                                        <button key={label} type="button" className="pc-well" style={{ "--c": c }} onClick={() => go(path)}>
+                                            <b style={{ fontFamily: DOCS_FONT }}>{n}</b>
+                                            <span>{label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
+
+                        <nav className="pc-card pc-quick" aria-label="Quick links">
+                            <button type="button" style={{ "--c": "var(--brand-text)" }} onClick={() => go("/intake")}><Svg d={I.plus} />Start a new legal intake<i aria-hidden="true">›</i></button>
+                            <button type="button" style={{ "--c": "#6addeb" }} onClick={() => go("/faqs")}><Svg d={I.help} />Help &amp; support<i aria-hidden="true">›</i></button>
+                            <button type="button" style={{ "--c": "#f28b80" }} onClick={async () => { await logout(); window.location.assign("/login"); }}><Svg d={I.out} />Sign out<i aria-hidden="true">›</i></button>
+                        </nav>
+                    </aside>
+                </div>
+            )}
+
+            {tab === "security" && (
+                <>
+                    <div className="pc-checks">
+                        <section className="pc-card pc-check" style={{ "--c": "var(--brand-text)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <span className="pc-ic big"><Svg d={I.mail} s={19} /></span>
+                                <span className="pc-chip" style={{ marginLeft: "auto" }}>Sign-in email</span>
+                            </div>
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 15.5, color: "var(--ink)" }}>Email</div>
+                                <div style={{ marginTop: 3, fontSize: 12.5, color: "var(--muted)", overflowWrap: "anywhere" }}>{user?.email || "No email on file"}</div>
+                            </div>
+                        </section>
+                        <section className="pc-card pc-check" style={{ "--c": "#6addeb" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <span className="pc-ic big"><Svg d={I.lock} s={19} /></span>
+                                <span className="pc-chip" style={{ marginLeft: "auto" }}>Set</span>
+                            </div>
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 15.5, color: "var(--ink)" }}>Password</div>
+                                <div style={{ marginTop: 3, fontSize: 12.5, color: "var(--muted)" }}>Use a strong password you use nowhere else.</div>
+                            </div>
+                            {!pwdMode && <button type="button" className="pc-btn" style={{ "--a": "#6addeb", alignSelf: "flex-start" }} onClick={() => setPwdMode(true)}>Change password</button>}
+                        </section>
+                        <section className="pc-card pc-check" style={{ "--c": "var(--gold)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <span className="pc-ic big"><Svg d={I.shield} s={19} /></span>
+                                <span className="pc-chip" style={{ marginLeft: "auto" }}>Not available yet</span>
+                            </div>
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 15.5, color: "var(--ink)" }}>Two-step sign-in</div>
+                                <div style={{ marginTop: 3, fontSize: 12.5, color: "var(--muted)" }}>A code on your phone as well as your password. Not offered yet, so it is not protecting your account.</div>
+                            </div>
+                        </section>
+                    </div>
+
+                    {pwdMode && (
+                        <section className="pc-card pc-sec" style={{ "--c": "#6addeb" }}>
+                            <h2 className="pc-h" style={{ marginBottom: 14 }}>Change password</h2>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+                                {[["current", "Current password", "current-password"], ["next", "New password", "new-password"], ["confirm", "Confirm new password", "new-password"]].map(([k, label, ac]) => (
+                                    <label key={k} style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--faint)" }}>
+                                        {label}
+                                        <ThemedInput type="password" autoComplete={ac} value={pwdData[k]} onChange={e => setPwdData(d => ({ ...d, [k]: e.target.value }))} />
+                                    </label>
+                                ))}
+                            </div>
+                            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                                <button type="button" className="pc-btn go" disabled={saving} onClick={handlePasswordUpdate}>{saving ? "Updating…" : "Update password"}</button>
+                                <button type="button" className="pc-btn" style={{ "--a": "var(--muted)" }} disabled={saving} onClick={() => { setPwdMode(false); setPwdData({ current: "", next: "", confirm: "" }); }}>Cancel</button>
+                            </div>
+                        </section>
                     )}
 
-                </div>
-            </Card>
+                    <section className="pc-card pc-sec">
+                        {/* The panel says what to do with an unknown device itself. */}
+                        <h2 className="pc-h" style={{ marginBottom: 10 }}>Devices signed in</h2>
+                        <SessionsPanel t={t} onSignedOut={logout} />
+                    </section>
+
+                    <section className="pc-card" style={{ "--c": "#f28b80", padding: "18px 24px", display: "flex", alignItems: "center", gap: 14, borderColor: "color-mix(in srgb, #f28b80 28%, transparent)" }}>
+                        <span className="pc-ic big"><Svg d={I.trash} s={19} /></span>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>Delete Account</div>
+                            <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Permanently removes your account. This cannot be undone.</div>
+                        </div>
+                        <button type="button" className="pc-btn" style={{ "--a": "#f28b80" }} onClick={() => setDelConfirm(true)}>Delete account…</button>
+                    </section>
+                </>
+            )}
         </div>
     );
 };

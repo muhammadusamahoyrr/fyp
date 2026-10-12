@@ -190,6 +190,40 @@ async def test_filters_combine(directory):
         assert "criminal" in u["lawyer_profile"]["specializations"]
 
 
+async def test_a_practice_area_beyond_the_case_types_filters_the_directory(directory):
+    """2026-10-10: the client directory's area chips. Property, corporate,
+    labour… are areas a lawyer lists, not case types; filtering by one returns
+    exactly the lawyers who list it -- never every civil lawyer instead."""
+    from app.core.security import hash_password
+    from app.db.collections import get_users_col
+
+    await get_users_col().insert_one({
+        "_id": "DIR-PROP", "role": "lawyer", "email": "dir-prop@x.test",
+        "password_hash": hash_password("Str0ngPass1"), "full_name": "Property Advocate",
+        "is_active": True, "province": "punjab",
+        "lawyer_profile": {"specializations": ["civil", "property"], "kyc_verified": True,
+                           "rating": 4.0, "availability": True},
+    })
+    found = await _search(specialization="property", page_size=50)
+    assert _ids(found) == ["DIR-PROP"]
+    assert _ids(await _search(specialization="corporate", page_size=50)) == []
+    # With a case type too, the lawyer must list both.
+    assert _ids(await _search(case_type="civil", specialization="property", page_size=50)) == ["DIR-PROP"]
+    assert _ids(await _search(case_type="criminal", specialization="property", page_size=50)) == []
+
+
+def test_the_practice_area_is_a_closed_set():
+    """The query value is checked against the listed areas before it reaches
+    the database: anything else is refused by the route (422)."""
+    import re
+    from app.core.constants import PRACTICE_AREAS, SPECIALIZATION_PATTERN
+
+    for area in PRACTICE_AREAS:
+        assert re.fullmatch(SPECIALIZATION_PATTERN, area)
+    for bad in ["$where", "property|civil", "Property", "", "tax "]:
+        assert not re.fullmatch(SPECIALIZATION_PATTERN, bad), bad
+
+
 async def test_fee_and_experience_are_not_accepted_as_filters(directory):
     """Removed deliberately, so their absence is pinned. Both fields are
     OPTIONAL on a lawyer, and any range over them has to decide what to do with

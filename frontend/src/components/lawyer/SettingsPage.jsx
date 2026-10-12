@@ -14,6 +14,7 @@ import SessionsPanel from "./SessionsPanel.jsx";
 import {
     changePassword, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay, closeAccount,
     getMe, listMyKycDocuments, uploadKycDocument, resubmitKyc, listSessions,
+    getReviewOffer, setReviewOffer,
 } from "@/lib/api.js";
 
 /* ── icons ── */
@@ -31,6 +32,7 @@ const P = {
     clock: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 6v6l4 2"],
     alert: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 8v4M12 16h.01"],
     user: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M4 21a8 8 0 0 1 16 0"],
+    doc: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "m9 15 2 2 4-4"],
 };
 const Svg = ({ d, size = 18 }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -43,6 +45,8 @@ const NAV = [
     { id: "overview", label: "Overview", icon: "grid", keys: "summary checklist" },
     { group: "Account" },
     { id: "verification", label: "Verification", icon: "shield", keys: "kyc bar council certificate documents upload" },
+    { group: "Services" },
+    { id: "review", label: "Document review", icon: "doc", keys: "quick review fee turnaround offer requests" },
     { group: "Security" },
     { id: "password", label: "Password", icon: "lock", keys: "change password security" },
     { id: "devices", label: "Devices & activity", icon: "monitor", keys: "sessions sign out signed in" },
@@ -257,6 +261,11 @@ function SettingsPage() {
     const [annual, setAnnual] = useState(false);
     const [kyc, setKyc] = useState({ status: "none", reason: null, docs: {}, busy: null, issues: {}, resubmitting: false, over: null });
     const fileRefs = useRef({});
+    // Quick document review: whether clients who have not hired this lawyer
+    // may ask them to check one document, and on what terms.
+    const [offer, setOffer] = useState(null);           // { enabled, fee, hours } as edited
+    const [offerBusy, setOfferBusy] = useState(false);
+    const [offerIssue, setOfferIssue] = useState(null);
 
     useEffect(() => {
         setSection(readSection());
@@ -270,6 +279,9 @@ function SettingsPage() {
         });
         listMyKycDocuments().then(({ data }) => { if (data && typeof data === "object") setKyc(k => ({ ...k, docs: data })); });
         listSessions().then(({ data }) => { if (data?.items) setSessions(data.items); });
+        Promise.resolve(getReviewOffer()).then(({ data } = {}) => {
+            if (data) setOffer({ enabled: !!data.enabled, fee: data.fee_pkr == null ? "" : String(data.fee_pkr), hours: data.turnaround_hours || 24 });
+        }).catch(() => {});
     }, []);
 
     // Back/Forward and a changed #hash pick the section too.
@@ -398,6 +410,18 @@ function SettingsPage() {
         window.location.assign("/login");
     };
 
+    const saveOffer = async () => {
+        setOfferIssue(null);
+        const fee = String(offer.fee).trim();
+        if (offer.enabled && !/^\d+$/.test(fee)) return setOfferIssue("Enter your review fee in rupees, as a whole number.");
+        setOfferBusy(true);
+        const { data, error } = await setReviewOffer({ enabled: offer.enabled, fee_pkr: fee === "" ? null : Number(fee), turnaround_hours: Number(offer.hours) }) || {};
+        setOfferBusy(false);
+        if (error || !data) return setOfferIssue(error?.message || "Could not save. Please try again.");
+        setOffer({ enabled: !!data.enabled, fee: data.fee_pkr == null ? "" : String(data.fee_pkr), hours: data.turnaround_hours });
+        toast.show(data.enabled ? "✅ Clients can now ask you for a document review" : "Document review turned off", "success", 2800);
+    };
+
     const handleSignOut = async () => {
         await logout();
         // Hard redirect: clears all in-memory app state along with the session
@@ -516,6 +540,39 @@ function SettingsPage() {
                     </div>
                 )}
                 <div className="st-note"><Svg d={P.clock} /><span>Drop a file on a row to upload it. Your documents are only seen by our verification team.</span></div>
+            </div>
+        </section>
+    );
+
+    const review = (
+        <section className="st-sec" aria-label="Document review" data-review-offer>
+            {head("Document review", "Let clients who haven't hired you send one document for you to check — no consultation needed. You choose the fee and how fast you return it.")}
+            <div className="st-card">
+                {offer === null ? <div className="st-row"><span className="tx"><small>Loading…</small></span></div> : (<>
+                    <div className="st-row">
+                        <span className="tx"><b>Offer document review</b><small>{offer.enabled ? "Clients see you on their Send for review page." : "Off — clients can't send you review requests."}</small></span>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
+                            <input type="checkbox" data-offer-enabled checked={offer.enabled} onChange={e => setOffer(o => ({ ...o, enabled: e.target.checked }))} style={{ width: 18, height: 18 }} />
+                            {offer.enabled ? "On" : "Off"}
+                        </label>
+                    </div>
+                    <div className="st-frow">
+                        <span><b>Review fee (Rs)</b><small>Shown to the client before they ask. No payment is taken in the app.</small></span>
+                        <input className="st-in" data-offer-fee inputMode="numeric" placeholder="e.g. 3000" value={offer.fee}
+                            onChange={e => setOffer(o => ({ ...o, fee: e.target.value.replace(/[^\d]/g, "").slice(0, 7) }))} />
+                    </div>
+                    <div className="st-frow">
+                        <span><b>Return within</b><small>Counted from when you accept a request.</small></span>
+                        <select className="st-in" data-offer-hours value={offer.hours} onChange={e => setOffer(o => ({ ...o, hours: Number(e.target.value) }))}>
+                            {[24, 48, 72].map(h => <option key={h} value={h}>{h} hours</option>)}
+                        </select>
+                    </div>
+                    {offerIssue && <div className="st-issue" role="alert">{offerIssue}</div>}
+                    <div className="st-foot">
+                        <span>Requests you don't answer within 24 hours close on their own. A new request shows at the top of your Documents inbox.</span>
+                        <button type="button" className="st-btn" data-offer-save onClick={saveOffer} disabled={offerBusy}>{offerBusy ? "Saving…" : "Save"}</button>
+                    </div>
+                </>)}
             </div>
         </section>
     );
@@ -659,7 +716,7 @@ function SettingsPage() {
         </section>
     );
 
-    const body = { overview, verification, password, devices, appearance, plan, account }[section] || overview;
+    const body = { overview, verification, review, password, devices, appearance, plan, account }[section] || overview;
 
     return (
         <div data-settings-ws data-drafting-theme data-mode={draftingMode(t)}>

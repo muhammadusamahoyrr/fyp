@@ -1,13 +1,21 @@
 'use client';
 // Paste your ModAgreements.jsx code here
 import React, { useState, Fragment, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
+import { LIcon } from "./documents/icons.jsx";
+// The Documents module's typeface (Nunito Sans), so the two paperwork
+// modules read as one product (2026-10-11).
+import { DOCS_FONT as AG_FONT } from "./documents/ui.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import SignaturePad from "@/components/shared/SignaturePad.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { createAgreement, getAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers, downloadExecutedAgreement, idempotencyKey, reissueAgreementInvitation, archiveAgreement, unarchiveAgreement } from "@/lib/api.js";
+import AgreementBody from "@/components/shared/AgreementBody.jsx";
+import { textToAgreementHtml, agreementPlainText } from "@/lib/agreementHtml.js";
+import { AGREEMENTS_DIY_ENABLED, AGREEMENTS_VIEW_EVENT, takePendingAgreementsView, announceAgreementsView } from "@/lib/agreementsNav.js";
+import { previewAgreementBody, createAgreement, getAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers, downloadExecutedAgreement, idempotencyKey, reissueAgreementInvitation, archiveAgreement, unarchiveAgreement } from "@/lib/api.js";
 
 /* ══════════════════════════════════════════════════════
    MODULE: AGREEMENTS — 5-Step Wizard
@@ -29,7 +37,7 @@ const Btn = ({ children, primary, outline, danger, style, disabled, onClick, ...
     const t = useTheme();
     const base = {
         display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
-        fontFamily: "'Inter',sans-serif", fontWeight: 600, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer",
+        fontFamily: "inherit", fontWeight: 600, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer",
         border: "none", borderRadius: 10, padding: "10px 20px", transition: "all 0.18s", outline: "none",
         opacity: disabled ? 0.45 : 1,
     };
@@ -107,7 +115,7 @@ const Input = ({ style, ...p }) => {
         <input style={{
             background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text,
             borderRadius: 10, padding: "11px 14px", fontSize: 13, outline: "none", width: "100%",
-            fontFamily: "'Inter',sans-serif", boxSizing: "border-box",
+            fontFamily: "inherit", boxSizing: "border-box",
             ...style
         }} {...p} />
     );
@@ -350,204 +358,366 @@ const StepBar = ({ steps, current }) => {
 };
 
 // ── PAGE: DASHBOARD ──────────────────────────
+/* The Agreements dashboard (2026-10-11), in the Overview's look: its own
+ * scoped CSS on [data-ag-dash], fed the client tokens. Every number and row is
+ * the client's real agreements; nothing here is sample data. */
+const AG_DASH_CSS = `[data-ag-dash]{display:flex;flex-direction:column;gap:18px;color:var(--ink)}
+[data-ag-dash] .ad-card{position:relative;border-radius:18px;border:1px solid color-mix(in srgb,var(--brand-text) 14%,var(--line));background:radial-gradient(120% 110% at 100% 0%,color-mix(in srgb,var(--c,var(--brand-text)) 9%,transparent) 0%,transparent 55%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,#fff 12%),var(--surface));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),inset 0 -3px 0 rgba(0,0,0,.2),0 14px 28px -16px rgba(0,0,0,.7)}
+[data-ag-dash] .ad-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+[data-ag-dash] .ad-head h1{margin:0;font-size:28px;font-weight:800;font-family:inherit;color:var(--ink)}
+[data-ag-dash] .ad-head p{margin:5px 0 0;font-size:14px;color:var(--muted)}
+[data-ag-dash] .ad-new{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 20px;border:0;border-radius:999px;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px -10px rgba(28,156,102,.85);transition:filter .15s,transform .12s}
+[data-ag-dash] .ad-new:hover{filter:brightness(1.08)}
+[data-ag-dash] .ad-new:active{transform:scale(.96)}
+[data-ag-dash] .ad-new svg{transition:transform .3s cubic-bezier(.3,1.4,.5,1)}
+[data-ag-dash] .ad-new:hover svg{transform:rotate(90deg)}
+[data-ag-dash] .ad-need{display:flex;align-items:center;gap:14px;padding:14px 18px;border-color:color-mix(in srgb,var(--gold) 45%,transparent);background:linear-gradient(90deg,color-mix(in srgb,var(--gold) 14%,var(--surface-2)),var(--surface-2) 65%)}
+[data-ag-dash] .ad-badge{width:38px;height:38px;flex:none;border-radius:50%;display:grid;place-items:center;background:#fff;color:#12897f;font-weight:800;font-size:15px;box-shadow:0 6px 14px -8px rgba(0,0,0,.6)}
+[data-ag-dash] .ad-need b{display:block;font-size:15px}
+[data-ag-dash] .ad-need small{display:block;margin-top:2px;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-ag-dash] .ad-go{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 18px;border:0;border-radius:999px;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;flex:none;box-shadow:0 8px 20px -10px rgba(28,156,102,.85)}
+[data-ag-dash] .ad-go:hover{filter:brightness(1.08)}
+[data-ag-dash] .ad-go .arr{display:inline-block;transition:transform .2s}
+[data-ag-dash] .ad-go:hover .arr{transform:translateX(3px)}
+[data-ag-dash] .ad-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+[data-ag-dash] .ad-stat{display:flex;flex-direction:column;gap:12px;padding:18px 20px;transition:transform .2s cubic-bezier(.22,1,.36,1),box-shadow .2s,border-color .2s}
+[data-ag-dash] .ad-stat:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--c) 45%,var(--line))}
+[data-ag-dash] .ad-stat .top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+[data-ag-dash] .ad-stat .lbl{font-size:13px;font-weight:600;color:var(--muted)}
+[data-ag-dash] .ad-stat .n{font-size:32px;font-weight:800;line-height:1;font-family:inherit}
+[data-ag-dash] .ad-ic{width:42px;height:42px;flex:none;border-radius:12px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 17%,transparent)}
+[data-ag-dash] .ad-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+[data-ag-dash] .ad-act{display:flex;align-items:center;gap:16px;padding:18px 20px;text-align:left;font:inherit;color:var(--ink);cursor:pointer;transition:border-color .2s,transform .2s}
+[data-ag-dash] .ad-act:hover{border-color:color-mix(in srgb,var(--c) 50%,var(--line));transform:translateY(-2px)}
+[data-ag-dash] .ad-act b{display:block;font-size:15.5px}
+[data-ag-dash] .ad-act small{display:block;margin-top:3px;font-size:13px;color:var(--muted)}
+[data-ag-dash] .ad-act .ad-ic{width:48px;height:48px}
+[data-ag-dash] .ad-arrow{margin-left:auto;width:38px;height:38px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);transition:background .2s,color .2s,transform .2s}
+[data-ag-dash] .ad-act:hover .ad-arrow{background:var(--c);color:#04262c;transform:translateX(3px)}
+[data-ag-dash] .ad-recent{padding:0;overflow:hidden}
+[data-ag-dash] .ad-recent-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px}
+[data-ag-dash] .ad-recent-head h2{margin:0;font-size:16px;font-weight:700;font-family:inherit}
+[data-ag-dash] .ad-btn{--a:var(--brand-text);display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:999px;border:1px solid color-mix(in srgb,var(--a) 38%,transparent);background:color-mix(in srgb,var(--a) 13%,var(--surface));color:var(--a);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s,border-color .2s,transform .12s}
+[data-ag-dash] .ad-btn:hover{background:var(--a);border-color:transparent;color:#04262c}
+[data-ag-dash] .ad-btn:active{transform:scale(.95);filter:brightness(.9)}
+[data-ag-dash] .ad-btn.solid{background:var(--a);border-color:transparent;color:#04262c}
+[data-ag-dash] .ad-row{display:grid;grid-template-columns:40px minmax(0,1fr) 170px 110px 120px;gap:14px;align-items:center;width:100%;padding:13px 20px;border:0;border-top:1px solid var(--line);background:transparent;text-align:left;font:inherit;color:var(--ink)}
+[data-ag-dash] .ad-row .ad-ic{width:40px;height:40px;border-radius:11px}
+[data-ag-dash] .ad-row b{display:block;font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-ag-dash] .ad-row small{display:block;margin-top:2px;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-ag-dash] .ad-bar{height:6px;border-radius:6px;background:var(--line);overflow:hidden}
+[data-ag-dash] .ad-bar i{display:block;height:100%;border-radius:6px;background:var(--c)}
+[data-ag-dash] .ad-prog small{margin-top:5px;font-size:12px}
+[data-ag-dash] .ad-chip{display:inline-flex;align-items:center;justify-content:center;height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);white-space:nowrap;width:max-content}
+[data-ag-dash] .ad-empty{padding:26px 20px 30px;border-top:1px solid var(--line);text-align:center;font-size:13.5px;color:var(--muted);line-height:1.6}
+@media (prefers-reduced-motion:reduce){[data-ag-dash] *{transition:none!important}}`;
+
+// One colour per kind of thing, as on the Overview.
+/* The All agreements list (2026-10-11), the same look as the dashboard. */
+const AG_ALL_CSS = `[data-ag-all] .al-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+[data-ag-all] .al-head h1{margin:0;font-size:28px;font-weight:800;font-family:inherit;color:var(--ink)}
+[data-ag-all] .al-head p{margin:5px 0 0;font-size:14px;color:var(--muted)}
+[data-ag-all] .al-search{display:flex;align-items:center;gap:8px;width:280px;height:42px;padding:0 16px;box-sizing:border-box;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--faint);transition:border-color .15s,box-shadow .15s}
+[data-ag-all] .al-search:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-ag-all] .al-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:13.5px}
+[data-ag-all] .al-search input::placeholder{color:var(--faint)}
+[data-ag-all] .al-new{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 20px;border:0;border-radius:999px;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 8px 20px -10px rgba(28,156,102,.85)}
+[data-ag-all] .al-new:hover{filter:brightness(1.08)}
+[data-ag-all] .al-new svg{transition:transform .3s cubic-bezier(.3,1.4,.5,1)}
+[data-ag-all] .al-new:hover svg{transform:rotate(90deg)}
+[data-ag-all] .al-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+[data-ag-all] .al-seg{display:flex;gap:4px;padding:4px;border-radius:999px;background:var(--surface);border:1px solid var(--line)}
+[data-ag-all] .al-seg button{height:34px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+[data-ag-all] .al-seg button:hover{color:var(--ink);background:var(--hover)}
+[data-ag-all] .al-seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+[data-ag-all] .al-arch{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+[data-ag-all] .al-arch:hover{color:var(--ink);border-color:var(--muted)}
+[data-ag-all] .al-arch[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+[data-ag-all] .al-table{border-radius:18px;border:1px solid color-mix(in srgb,var(--brand-text) 14%,var(--line));background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,#fff 12%),var(--surface));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 14px 28px -16px rgba(0,0,0,.7)}
+[data-ag-all] .al-grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(0,1.5fr) 120px 150px 150px;gap:16px;align-items:center;min-width:820px}
+[data-ag-all] .al-th{padding:11px 22px;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--faint);background:color-mix(in srgb,var(--surface-2) 70%,transparent);border-radius:18px 18px 0 0;border-bottom:1px solid var(--line)}
+[data-ag-all] .al-tr{padding:14px 22px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .15s}
+[data-ag-all] .al-tr:hover{background:color-mix(in srgb,var(--c) 7%,transparent)}
+[data-ag-all] .al-ic{width:40px;height:40px;flex:none;border-radius:11px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 17%,transparent)}
+[data-ag-all] .al-title{font-size:14.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-ag-all] .al-sub{margin-top:2px;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-ag-all] .al-avs{display:flex;align-items:center}
+[data-ag-all] .al-av{width:30px;height:30px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:800;color:var(--c);background:color-mix(in srgb,var(--c) 20%,var(--surface));border:2px solid var(--surface);box-sizing:border-box}
+[data-ag-all] .al-av+.al-av{margin-left:-8px}
+[data-ag-all] .al-chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);white-space:nowrap;width:max-content}
+[data-ag-all] .al-chip i{width:6px;height:6px;border-radius:50%;background:currentColor}
+[data-ag-all] .al-pbar{height:6px;border-radius:6px;background:var(--line);overflow:hidden}
+[data-ag-all] .al-pbar i{display:block;height:100%;border-radius:6px;background:var(--c)}
+[data-ag-all] .al-acts{display:flex;align-items:center;justify-content:flex-end;gap:4px}
+[data-ag-all] .al-btn{--a:var(--brand-text);display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:999px;border:1px solid color-mix(in srgb,var(--a) 38%,transparent);background:color-mix(in srgb,var(--a) 13%,var(--surface));color:var(--a);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s,border-color .2s,transform .12s}
+[data-ag-all] .al-btn:hover{background:var(--a);border-color:transparent;color:#04262c}
+[data-ag-all] .al-btn:active{transform:scale(.95);filter:brightness(.9)}
+[data-ag-all] .al-btn.solid{background:var(--a);border-color:transparent;color:#04262c}
+[data-ag-all] .al-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 22px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+[data-ag-all] .al-empty{padding:44px 20px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.6}
+[data-ag-all] .al-empty b{display:block;margin-bottom:4px;font-size:15px;color:var(--ink)}
+@media (prefers-reduced-motion:reduce){[data-ag-all] *{transition:none!important}}`;
+
+const AD_MINT = "#3ee0a1", AD_GOLD = "#f2c35e", AD_CYAN = "#6addeb", AD_LAV = "#b9a6f2", AD_CORAL = "#f28b80";
+
+const AdIcon = ({ d, s = 20, w = 2 }) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+);
+const AD_PATH = {
+    file: "M14 2H6v20h12V8zM14 2v6h6",
+    pen: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+    clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+    check: "M5 12l4 4 10-10",
+    plus: "M12 5v14M5 12h14",
+    scale: "M12 3v18M7 21h10M5 7h14M5 7l-3 7a3.2 3.2 0 0 0 6 0L5 7zM19 7l-3 7a3.2 3.2 0 0 0 6 0l-3-7z",
+    x: "M6 6l12 12M18 6L6 18",
+    arrow: "M5 12h14M13 6l6 6-6 6",
+};
+
+/* How a row reads: its colour, chip, icon and the one button that moves it on. */
+const rowLook = (a) => {
+    if (a.needsMySig) return { c: AD_GOLD, chip: "Needs you", icon: a.isEngagementLetter ? "scale" : "pen", act: "sign" };
+    if (a.status === "Signed") return { c: AD_MINT, chip: "Signed", icon: "check", act: "pdf" };
+    if (a.status === "Rejected") return { c: AD_CORAL, chip: "Rejected", icon: "x", act: "open" };
+    if (a.status === "Draft") return { c: "#9aa8a6", chip: "Draft", icon: "file", act: "open" };
+    return { c: AD_CYAN, chip: "Pending", icon: a.isEngagementLetter ? "scale" : "file", act: "open" };
+};
+
 const PageDashboard = ({ onNavigate }) => {
-    const t = useTheme();
     const { user } = useAuth();
-    const [agmts, loading] = useMyAgreements(user?._id);
-    const awaitingMe = agmts.filter(a => a.needsMySig).length;
+    const toast = useToast();
+    const [agmts, loading, , meta] = useMyAgreements(user?._id);
+    const waitingMe = agmts.filter(a => a.needsMySig);
     const stats = [
-        { label: "Total Agreements", val: agmts.length, sub: null, icon: "📄", color: t.primary },
-        { label: "Awaiting My Signature", val: awaitingMe, sub: awaitingMe ? "Action needed" : null, icon: "✍️", color: t.warn },
-        { label: "Pending Others", val: agmts.filter(a => a.status === "Pending" && !a.needsMySig).length, sub: null, icon: "⏰", color: t.info },
-        { label: "Executed", val: agmts.filter(a => a.status === "Signed").length, sub: null, icon: "✅", color: t.success },
+        // The server's total, not the loaded page's length.
+        { label: "All agreements", val: meta?.total ?? agmts.length, c: AD_MINT, icon: "file" },
+        { label: "Waiting on me", val: waitingMe.length, c: AD_GOLD, icon: "pen", hot: waitingMe.length > 0 },
+        { label: "Waiting on others", val: agmts.filter(a => a.status === "Pending" && !a.needsMySig).length, c: AD_CYAN, icon: "clock" },
+        { label: "Signed by everyone", val: agmts.filter(a => a.status === "Signed").length, c: AD_LAV, icon: "check" },
     ];
+    const download = async (a) => {
+        const { error } = await downloadExecutedAgreement(a.id, `${a.name}.pdf`);
+        if (error) toast.show("\u274c " + (error.message || "Could not download it"), "danger");
+        else toast.show("\u2b07 Downloaded", "success");
+    };
+    const recent = agmts.slice(0, 5);
     return (
-        <div>
-            <div style={{ marginBottom: 28 }}>
-                <h1 style={{ fontSize: 28, fontWeight: 800, color: t.text, margin: 0, fontFamily: "'Sora','Inter',sans-serif" }}>Dashboard</h1>
-                <p style={{ fontSize: 13, color: t.textMuted, margin: "4px 0 0" }}>Overview of your digital agreements</p>
-            </div>
+        <div data-ag-dash="">
+            <style>{AG_DASH_CSS}</style>
+            <header className="ad-head">
+                <div>
+                    <h1>Agreements</h1>
+                    <p>Agreements you are part of, and the ones waiting on you.</p>
+                </div>
+                {DIY_BUILDER_ENABLED && (
+                    <button type="button" className="ad-new" onClick={() => onNavigate("templates")}>
+                        <AdIcon d={AD_PATH.plus} s={16} w={2.6} /> New agreement
+                    </button>
+                )}
+            </header>
 
-            {/* Stats row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 }}>
+            {waitingMe.length > 0 && (
+                <section className="ad-card ad-need" aria-label="Waiting for your signature">
+                    <span className="ad-badge">{waitingMe.length}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <b>{waitingMe.length === 1 ? "1 agreement needs your signature" : `${waitingMe.length} agreements need your signature`}</b>
+                        <small>{waitingMe.slice(0, 3).map(a => a.name).join(" · ")}</small>
+                    </div>
+                    <button type="button" className="ad-go" onClick={() => onNavigate("all", { filter: "Pending" })}>
+                        Review now <span className="arr" aria-hidden="true"><LIcon name="arrowRight" size={15} stroke={2.2} /></span>
+                    </button>
+                </section>
+            )}
+
+            <div className="ad-stats">
                 {stats.map(s => (
-                    <Card key={s.label} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: 20 }}>
-                        <div>
-                            <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 6 }}>{s.label}</div>
-                            <div style={{ fontSize: 32, fontWeight: 800, color: t.text, fontFamily: "'Sora','Inter',sans-serif", lineHeight: 1 }}>{s.val}</div>
-                            {s.sub && <div style={{ fontSize: 11, color: t.success, marginTop: 6 }}>{s.sub}</div>}
+                    <div key={s.label} className="ad-card ad-stat" style={{ "--c": s.c }}>
+                        <div className="top">
+                            <span className="lbl">{s.label}</span>
+                            <span className="ad-ic"><AdIcon d={AD_PATH[s.icon]} /></span>
                         </div>
-                        <div style={{
-                            width: 40, height: 40, borderRadius: 10, background: t.primaryGlow,
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18
-                        }}>{s.icon}</div>
-                    </Card>
-                ))}
-            </div>
-
-            {/* Quick actions */}
-            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
-                {[
-                    // "Create Agreement" is dropped while the builder is parked
-                    // rather than shown and redirected: a card that advertises a
-                    // feature and then lands somewhere else is its own small lie,
-                    // and this module has just had several removed.
-                    ...(DIY_BUILDER_ENABLED ? [
-                        { ico: "📄", title: "Create Agreement", sub: "Start from a template or scratch", page: "templates" },
-                    ] : []),
-                    { ico: "✍️", title: "Sign Agreement", sub: "Review and sign pending documents", page: "all" },
-                ].map(a => (
-                    <div key={a.title} onClick={() => onNavigate(a.page)} style={{
-                        display: "flex", alignItems: "center", gap: 16, padding: "20px 24px",
-                        background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16,
-                        cursor: "pointer", transition: "all 0.2s", boxShadow: t.shadowCard,
-                    }}
-                        onMouseEnter={e => { e.currentTarget.style.border = `1.5px solid ${t.primary}`; e.currentTarget.style.boxShadow = t.shadowHover; }}
-                        onMouseLeave={e => { e.currentTarget.style.border = `1.5px solid ${t.border}`; e.currentTarget.style.boxShadow = t.shadowCard; }}
-                    >
-                        <div style={{
-                            width: 48, height: 48, borderRadius: 12, background: t.grad1,
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0
-                        }}>{a.ico}</div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{a.title}</div>
-                            <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>{a.sub}</div>
-                        </div>
-                        <span style={{ color: t.primary, fontSize: 18 }}>→</span>
+                        <span className="n" style={s.hot ? { color: s.c } : undefined}>{loading ? "–" : s.val}</span>
                     </div>
                 ))}
             </div>
 
-            {/* Recent agreements */}
-            <Card style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "14px 20px", borderBottom: `1px solid ${t.border}`
-                }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Recent Agreements</span>
-                    <span onClick={() => onNavigate("all")} style={{ fontSize: 12, color: t.primary, cursor: "pointer", fontWeight: 600 }}>View All</span>
+            <div className="ad-acts">
+                {/* "Create" is dropped while the builder is parked rather than
+                    shown and redirected: a card that advertises a feature and
+                    then lands somewhere else is its own small lie. */}
+                {DIY_BUILDER_ENABLED && (
+                    <button type="button" className="ad-card ad-act" style={{ "--c": AD_MINT }} onClick={() => onNavigate("templates")}>
+                        <span className="ad-ic"><AdIcon d={AD_PATH.plus} s={22} w={2.4} /></span>
+                        <span><b>Create an agreement</b><small>Start from a template or a blank page</small></span>
+                        <span className="ad-arrow"><AdIcon d={AD_PATH.arrow} s={17} /></span>
+                    </button>
+                )}
+                <button type="button" className="ad-card ad-act" style={{ "--c": AD_GOLD }} onClick={() => onNavigate("all", { filter: "Pending" })}>
+                    <span className="ad-ic"><AdIcon d={AD_PATH.pen} s={22} /></span>
+                    <span><b>Sign what's waiting</b><small>Opens your agreements that are still pending</small></span>
+                    <span className="ad-arrow"><AdIcon d={AD_PATH.arrow} s={17} /></span>
+                </button>
+            </div>
+
+            <section className="ad-card ad-recent" aria-label="Recent agreements">
+                <div className="ad-recent-head">
+                    <h2>Recent agreements</h2>
+                    <button type="button" className="ad-btn" style={{ "--a": AD_CYAN }} onClick={() => onNavigate("all")}>See all</button>
                 </div>
                 {loading ? (
-                    <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading…</div>
-                ) : agmts.length === 0 ? (
-                    <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
+                    <div className="ad-empty">Loading…</div>
+                ) : recent.length === 0 ? (
+                    <div className="ad-empty">
                         {DIY_BUILDER_ENABLED
-                            ? "No agreements yet — create one to get started."
+                            ? "No agreements yet. When a lawyer sends you an engagement letter, it appears here, or create one yourself."
                             : "No agreements yet. Agreements shared with you appear here for you to read and sign."}
                     </div>
-                ) : agmts.slice(0, 4).map((a, i) => (
-                    <div key={a.id} onClick={() => onNavigate("all")} style={{
-                        display: "flex", alignItems: "center", gap: 12, padding: "14px 20px",
-                        borderBottom: i < Math.min(agmts.length, 4) - 1 ? `1px solid ${t.border}` : "none",
-                        transition: "background 0.15s", cursor: "pointer",
-                    }}
-                        onMouseEnter={e => e.currentTarget.style.background = t.cardHi}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    >
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, background: t.primaryGlow,
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0
-                        }}>{a.isEngagementLetter ? "⚖️" : "📄"}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>
-                                {a.signedCount} of {a.totalParties} signed{a.needsMySig ? " · your signature needed" : ""}
+                ) : recent.map(a => {
+                    const look = rowLook(a);
+                    const pct = a.totalParties ? Math.round((a.signedCount / a.totalParties) * 100) : 0;
+                    const progress = a.status === "Signed" ? "All signed"
+                        : `${a.signedCount} of ${a.totalParties} signed`;
+                    return (
+                        <div key={a.id} className="ad-row" style={{ "--c": look.c }}>
+                            <span className="ad-ic"><AdIcon d={AD_PATH[look.icon]} s={18} w={look.icon === "check" ? 2.4 : 2} /></span>
+                            <div style={{ minWidth: 0 }}>
+                                <b>{a.name}</b>
+                                <small>{a.isEngagementLetter ? "Engagement letter" : "Agreement"}{a.date ? ` · ${a.date}` : ""}</small>
                             </div>
+                            <div className="ad-prog">
+                                <div className="ad-bar"><i style={{ width: `${pct}%` }} /></div>
+                                <small>{progress}</small>
+                            </div>
+                            <span className="ad-chip">{look.chip}</span>
+                            {look.act === "sign" ? (
+                                <button type="button" className="ad-btn solid" style={{ "--a": AD_MINT }} onClick={() => onNavigate("all", { filter: "Pending" })}>Sign</button>
+                            ) : look.act === "pdf" ? (
+                                <button type="button" className="ad-btn" style={{ "--a": AD_LAV }} onClick={() => download(a)}>PDF ↓</button>
+                            ) : (
+                                <button type="button" className="ad-btn" style={{ "--a": AD_CYAN }} onClick={() => onNavigate("all")}>Open</button>
+                            )}
                         </div>
-                        <div style={{ fontSize: 11, color: t.textMuted, marginRight: 10 }}>{a.date}</div>
-                        <StatusBadge status={a.status} />
-                    </div>
-                ))}
-            </Card>
+                    );
+                })}
+            </section>
         </div>
     );
 };
 
 // ── PAGE: TEMPLATE GALLERY ───────────────────
+/* The gallery (2026-10-11), in the dashboard's look. The withdrawal notice is
+ * said ONCE, above the grid, instead of the same paragraph in every card; each
+ * card still carries a short "Under review" mark, so no card reads as ready. */
+const AG_TPL_CSS = `[data-ag-tpl] .tp-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+[data-ag-tpl] .tp-head h1{margin:0;font-size:28px;font-weight:800;font-family:inherit;color:var(--ink)}
+[data-ag-tpl] .tp-head p{margin:5px 0 0;font-size:14px;color:var(--muted)}
+[data-ag-tpl] .tp-search{display:flex;align-items:center;gap:8px;width:260px;height:42px;padding:0 16px;box-sizing:border-box;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--faint);transition:border-color .15s,box-shadow .15s}
+[data-ag-tpl] .tp-search:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-ag-tpl] .tp-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit;font-size:13.5px}
+[data-ag-tpl] .tp-search input::placeholder{color:var(--faint)}
+[data-ag-tpl] .tp-note{display:flex;gap:14px;align-items:center;padding:14px 18px;margin-bottom:18px;border-radius:14px;background:color-mix(in srgb,var(--gold) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--gold) 40%,transparent);font-size:13.5px;line-height:1.5;color:var(--ink)}
+[data-ag-tpl] .tp-note b{color:var(--gold)}
+[data-ag-tpl] .tp-note .ic{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--gold);background:color-mix(in srgb,var(--gold) 20%,transparent)}
+[data-ag-tpl] .tp-cats{display:flex;gap:4px;padding:4px;margin-bottom:18px;border-radius:999px;background:var(--surface);border:1px solid var(--line);width:max-content;max-width:100%;flex-wrap:wrap}
+[data-ag-tpl] .tp-cats button{height:34px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+[data-ag-tpl] .tp-cats button:hover{color:var(--ink);background:var(--hover)}
+[data-ag-tpl] .tp-cats button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+[data-ag-tpl] .tp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+[data-ag-tpl] .tp-card{position:relative;display:flex;flex-direction:column;gap:8px;padding:20px;border-radius:18px;text-align:left;font:inherit;color:var(--ink);cursor:pointer;border:1px solid color-mix(in srgb,var(--brand-text) 14%,var(--line));background:radial-gradient(120% 110% at 100% 0%,color-mix(in srgb,var(--c) 10%,transparent) 0%,transparent 55%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 88%,#fff 12%),var(--surface));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),inset 0 -3px 0 rgba(0,0,0,.2),0 14px 28px -16px rgba(0,0,0,.7);transition:transform .2s cubic-bezier(.22,1,.36,1),border-color .2s,box-shadow .2s}
+[data-ag-tpl] .tp-card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--c) 50%,var(--line));box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 30px -16px color-mix(in srgb,var(--c) 60%,#000)}
+[data-ag-tpl] .tp-card:focus-visible{outline:2px solid var(--c);outline-offset:2px}
+[data-ag-tpl] .tp-card.blank{border:1.5px dashed color-mix(in srgb,var(--c) 60%,transparent);background:transparent;box-shadow:none}
+[data-ag-tpl] .tp-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px}
+[data-ag-tpl] .tp-ic{width:46px;height:46px;flex:none;border-radius:13px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 17%,transparent);transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
+[data-ag-tpl] .tp-card:hover .tp-ic{transform:scale(1.08) rotate(-4deg)}
+[data-ag-tpl] .tp-flag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:700;color:var(--gold);background:color-mix(in srgb,var(--gold) 14%,transparent);white-space:nowrap}
+[data-ag-tpl] .tp-tag{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--c)}
+[data-ag-tpl] .tp-card h3{margin:0;font-size:16.5px;font-weight:700;font-family:inherit}
+[data-ag-tpl] .tp-card p{margin:0;flex:1;font-size:13px;line-height:1.55;color:var(--muted)}
+[data-ag-tpl] .tp-use{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:38px;margin-top:10px;border-radius:999px;font-size:13.5px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 35%,transparent);transition:background .2s,color .2s}
+[data-ag-tpl] .tp-use .arr{display:inline-block;transition:transform .2s}
+[data-ag-tpl] .tp-card:hover .tp-use{background:var(--c);color:#04262c;border-color:transparent}
+[data-ag-tpl] .tp-card:hover .tp-use .arr{transform:translateX(3px)}
+[data-ag-tpl] .tp-empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:13.5px}
+@media (prefers-reduced-motion:reduce){[data-ag-tpl] *{transition:none!important}}`;
+
+/* Each template's colour and icon, by name. */
+const TPL_LOOK = {
+    "Employment Contract": { c: "#f2c35e", d: "M3 7h18v13H3zM9 7V4h6v3" },
+    "Non-Disclosure Agreement": { c: "#b9a6f2", d: "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4" },
+    "Lease Agreement": { c: "#6addeb", d: "M3 11l9-8 9 8v10H3zM9 21v-6h6v6" },
+    "Service Agreement": { c: "#6addeb", d: "M14 2H6v20h12V8zM14 2v6h6M9 13h6M9 17h4" },
+    "Partnership Agreement": { c: "#b9a6f2", d: "M8 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM16 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5" },
+    "Freelancer Contract": { c: "#f2c35e", d: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-6 8-6s8 2 8 6" },
+};
+
 const PageTemplates = ({ onNavigate, onSelectTemplate }) => {
-    const t = useTheme();
-    const [cat, setCat] = useState("All Templates");
+    const [cat, setCat] = useState("All");
     const [search, setSearch] = useState("");
-    const cats = ["All Templates", "Employment", "NDA", "Lease", "Service", "Partnership"];
+    const cats = ["All", "Employment", "NDA", "Lease", "Service", "Partnership"];
     const filtered = TEMPLATES.filter(tmpl =>
-        (cat === "All Templates" || tmpl.cat === cat || tmpl.name.toLowerCase().includes(cat.toLowerCase())) &&
+        (cat === "All" || tmpl.cat === cat || tmpl.name.toLowerCase().includes(cat.toLowerCase())) &&
         tmpl.name.toLowerCase().includes(search.toLowerCase())
     );
+    const start = (tmpl) => { onSelectTemplate(tmpl); onNavigate("create"); };
+    const anyUnreviewed = TEMPLATES.some(x => x.unreviewed);
     return (
-        <div>
-            <div style={{ marginBottom: 24 }}>
-                <h1 style={{ fontSize: 28, fontWeight: 800, color: t.text, margin: 0, fontFamily: "'Sora','Inter',sans-serif" }}>Agreement Templates</h1>
-                <p style={{ fontSize: 13, color: t.textMuted, margin: "4px 0 0" }}>Browse and select a template to get started</p>
-            </div>
+        <div data-ag-tpl="">
+            <style>{AG_TPL_CSS}</style>
+            <header className="tp-head">
+                <div>
+                    <h1>Agreement templates</h1>
+                    <p>Pick a starting point. You can change every word before anyone signs.</p>
+                </div>
+                <label className="tp-search">
+                    <AdIcon d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3" s={16} />
+                    <input aria-label="Search templates" placeholder="Search templates" value={search} onChange={e => setSearch(e.target.value)} />
+                </label>
+            </header>
 
-            {/* Category pills */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+            {/* Said once. The POPULAR badge and the per-card paragraph are gone:
+                every template body is the withdrawal notice, and the backend
+                refuses it at both create and sign. */}
+            {anyUnreviewed && (
+                <div className="tp-note" role="note">
+                    <span className="ic"><AdIcon d="M12 3l10 18H2zM12 10v5M12 18h.01" s={17} w={2.2} /></span>
+                    <span><b>Templates are under review.</b> Their wording was withdrawn pending review by a qualified Pakistani lawyer. You can start from one, but you must replace the notice with your own wording before it can be sent.</span>
+                </div>
+            )}
+
+            <div className="tp-cats" role="group" aria-label="Filter by category">
                 {cats.map(c => (
-                    <button key={c} onClick={() => setCat(c)} style={{
-                        padding: "9px 18px", borderRadius: 50, fontSize: 13, fontWeight: cat === c ? 700 : 500,
-                        cursor: "pointer", fontFamily: "'Inter',sans-serif",
-                        border: `1.5px solid ${cat === c ? t.primary : t.border}`,
-                        background: cat === c ? t.primaryGlow : "transparent",
-                        color: cat === c ? t.primary : t.textMuted, transition: "all 0.18s",
-                    }}>{c}</button>
+                    <button key={c} type="button" aria-pressed={cat === c} onClick={() => setCat(c)}>{c}</button>
                 ))}
             </div>
 
-            {/* Template grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
-                {filtered.map((tmpl, i) => (
-                    <Card key={i} style={{
-                        padding: 24, display: "flex", flexDirection: "column", gap: 0, position: "relative",
-                        transition: "all 0.2s",
-                    }}
-                        onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${t.primary}`; e.currentTarget.style.boxShadow = t.shadowHover; }}
-                        onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${t.border}`; e.currentTarget.style.boxShadow = t.shadowCard; }}
-                    >
-                        {/* The POPULAR badge is gone. Every template body is the
-                            withdrawal notice, and the backend refuses it at both
-                            create and sign -- so "Popular" was recommending the
-                            route most likely to waste the user's work. The badge
-                            now says what is actually true about the template. */}
-                        {tmpl.unreviewed && (
-                            <div style={{
-                                position: "absolute", top: 16, right: 16, fontSize: 10, fontWeight: 800,
-                                letterSpacing: "0.6px", color: t.warn || "#f59e0b",
-                                background: `${t.warn || "#f59e0b"}18`,
-                                border: `1px solid ${t.warn || "#f59e0b"}40`, borderRadius: 6, padding: "3px 8px"
-                            }}>WITHDRAWN</div>
-                        )}
-                        <div style={{
-                            width: 44, height: 44, borderRadius: 12, background: t.primaryGlow,
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
-                            border: `1px solid ${t.primary}30`, marginBottom: 14
-                        }}>{tmpl.ico}</div>
-                        <div style={{
-                            fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 8,
-                            fontFamily: "'Sora','Inter',sans-serif"
-                        }}>{tmpl.name}</div>
-                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55, marginBottom: 12, flex: 1 }}>{tmpl.desc}</div>
-                        {tmpl.unreviewed && (
-                            <div style={{
-                                fontSize: 11, color: t.textMuted, lineHeight: 1.5, marginBottom: 12,
-                                background: t.inputBg, borderRadius: 8, padding: "8px 10px",
-                            }}>
-                                The wording for this template was withdrawn pending review by a
-                                qualified Pakistani lawyer. You can start from it, but you must
-                                replace the notice with your own wording before it can be sent.
+            <div className="tp-grid">
+                {cat === "All" && !search && (
+                    <button type="button" className="tp-card blank" style={{ "--c": AD_MINT }} onClick={() => start(null)}>
+                        <div className="tp-top"><span className="tp-ic"><AdIcon d={AD_PATH.plus} s={22} w={2.4} /></span></div>
+                        <span className="tp-tag">Your own</span>
+                        <h3>Blank agreement</h3>
+                        <p>Start from an empty page and write your own terms.</p>
+                        <span className="tp-use">Start blank <span className="arr" aria-hidden="true"><LIcon name="arrowRight" size={15} stroke={2.2} /></span></span>
+                    </button>
+                )}
+                {filtered.map(tmpl => {
+                    const look = TPL_LOOK[tmpl.name] || { c: AD_CYAN, d: AD_PATH.file };
+                    return (
+                        <button key={tmpl.name} type="button" className="tp-card" style={{ "--c": look.c }} onClick={() => start(tmpl)}>
+                            <div className="tp-top">
+                                <span className="tp-ic"><AdIcon d={look.d} s={22} /></span>
+                                {tmpl.unreviewed && <span className="tp-flag" title="Wording withdrawn pending a lawyer's review">Under review</span>}
                             </div>
-                        )}
-                        {/* Preview used to alert() the template's own name and
-                            nothing else. There is also nothing to preview: every
-                            template body is the withdrawal notice. */}
-                        <div style={{ display: "flex", gap: 8 }}>
-                            <Btn outline style={{ flex: 1, fontSize: 12, padding: "9px 0" }}
-                                onClick={() => { onSelectTemplate(tmpl); onNavigate("create"); }}>
-                                Start from this
-                            </Btn>
-                        </div>
-                    </Card>
-                ))}
+                            <span className="tp-tag">{tmpl.cat}</span>
+                            <h3>{tmpl.name}</h3>
+                            <p>{tmpl.desc}</p>
+                            <span className="tp-use">Start from this <span className="arr" aria-hidden="true"><LIcon name="arrowRight" size={15} stroke={2.2} /></span></span>
+                        </button>
+                    );
+                })}
             </div>
+            {filtered.length === 0 && <div className="tp-empty">No template matches. Try another word or category.</div>}
         </div>
     );
 };
@@ -560,8 +730,12 @@ const PageTemplates = ({ onNavigate, onSelectTemplate }) => {
    They were also describing something the editor cannot do. The body is a plain
    <textarea> producing plain text, stored in a field called `body_html`, so the
    toolbar promised rich formatting in both directions and delivered it in
-   neither. A real editor is explicitly out of scope (see the product plan's
-   non-goals); the honest interim is a plain text box that looks like one. */
+   neither. The interim was a plain text box that looked like one.
+
+   2026-10-11: the real thing, on the owner's decision. Every control below
+   has a handler, and the body is now a declared rich format (`html`) that
+   the server sanitises and the PDF and every viewer render -- so the
+   formatting is delivered in both directions. See AgreementEditor. */
 
 
 /* Mirrors `_MAX_BODY` in backend/app/schemas/agreement.py. The server refuses
@@ -581,309 +755,384 @@ const INSERTABLES = [
     { label: "[CNIC]", build: () => "[CNIC]" },
 ];
 
-const CASES = [
-    { label: "UPPERCASE", fn: (x) => x.toUpperCase() },
-    { label: "lowercase", fn: (x) => x.toLowerCase() },
-    { label: "Title Case", fn: (x) => x.replace(/\w\S*/g,
-        w => w[0].toUpperCase() + w.slice(1).toLowerCase()) },
-    { label: "Sentence case", fn: (x) => x.toLowerCase().replace(/(^\s*\w|[.!?]\s+\w)/g,
-        m => m.toUpperCase()) },
-];
-
-/* A DOCUMENT-EDITING bar, not a formatting one.
+/* THE RICH EDITOR (2026-10-11). The body is `body_format: "html"`: what the
+ * toolbar can make -- paragraphs, headings, bold, italic, underline,
+ * strikethrough, alignment, lists, a quote, a divider -- and nothing else. The
+ * server sanitises to exactly that allowlist and refuses a body it would have
+ * to change (backend agreement_html), so the Review step shows the server's
+ * canonical form and that is what is sent, hashed and signed.
  *
- * Every control writes or rearranges characters, because characters are all a
- * signed plain-text agreement can carry. Bold, italic, underline and alignment
- * are deliberately absent: the body is hashed and signed verbatim, so they
- * could only do nothing or inject markup that appears literally in the
- * document. A 24-button bar offering exactly those was removed from this spot
- * once already, with no handler on any of them -- see the TOOLBAR_ACTIONS note.
- */
-const DraftingToolbar = ({ body, setBody, textareaRef, zoom, setZoom,
-                          onUndo, onRedo, canUndo, canRedo }) => {
-    const t = useTheme();
-    const [menu, setMenu] = useState(null);      // "insert" | "case" | null
-    const [findOpen, setFindOpen] = useState(false);
-    const [find, setFind] = useState("");
-    const [repl, setRepl] = useState("");
+ * It replaced a plain-text bar whose note said bold and alignment could not be
+ * offered: they could not while the body was plain text. It is no longer.
+ *
+ * The look is the lawyer drafting toolbar's, as the client's own copy, scoped
+ * by [data-ag-tb]; it sticks to the top while the page scrolls under it. */
+const AG_TB_CSS = `[data-ag-tb]{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:6px;margin-bottom:12px;padding:6px;border-radius:16px;border:1px solid var(--line);background:var(--surface);box-shadow:0 12px 24px -16px rgba(0,0,0,.8)}
+[data-ag-tb] .tb-scroll{flex:1;min-width:0;display:flex;align-items:center;gap:2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding:2px}
+[data-ag-tb] .tb-scroll::-webkit-scrollbar{display:none}
+[data-ag-tb] .tb-sep{flex:none;width:1px;height:22px;background:var(--line);margin:0 5px}
+[data-ag-tb] .tb-btn{flex:none;position:relative;width:34px;height:34px;padding:0;border:0;border-radius:9px;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s,transform .12s}
+[data-ag-tb] .tb-btn:hover:not(:disabled){background:var(--hover);color:var(--ink)}
+[data-ag-tb] .tb-btn:active:not(:disabled){transform:scale(.92)}
+[data-ag-tb] .tb-btn[data-on="true"]{background:#3fd0e0;color:#062a30}
+[data-ag-tb] .tb-btn:disabled{opacity:.4;cursor:not-allowed}
+[data-ag-tb] .tb-pk{flex:none;display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 6px 0 8px;border-radius:9px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .15s}
+[data-ag-tb] .tb-pk:hover,[data-ag-tb] .tb-pk[aria-expanded="true"]{border-color:#3fd0e0}
+[data-ag-tb] .tb-pk > svg:first-child{color:var(--muted)}
+[data-ag-tb] .tb-pk .v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+[data-ag-tb] .tb-pk .chev{display:inline-flex;color:var(--muted);transition:transform .2s}
+[data-ag-tb] .tb-pk[aria-expanded="true"] .chev{transform:rotate(180deg)}
+.tb-pk-menu{position:fixed;z-index:80;font-family:${AG_FONT};max-height:260px;overflow-y:auto;padding:5px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 18px 36px -14px rgba(0,0,0,.75);scrollbar-width:thin}
+.tb-pk-menu button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:7px 10px;border:0;border-radius:8px;background:transparent;color:var(--ink);font-size:13px;text-align:left;cursor:pointer;white-space:nowrap}
+.tb-pk-menu button:hover{background:var(--hover)}
+.tb-pk-menu button[aria-selected="true"]{background:color-mix(in srgb,#3fd0e0 18%,transparent);color:#3fd0e0;font-weight:700}
+.tb-pk-menu .hint{font-size:11px;color:var(--faint);font-family:${AG_FONT};font-weight:500}
+[data-ag-tb] .tb-color input{position:absolute;inset:0;opacity:0;cursor:pointer}
+[data-ag-tb] .tb-color i{position:absolute;left:9px;right:9px;bottom:5px;height:3px;border-radius:2px}
+[data-ag-tb] .tb-drop{position:relative;flex:none}
+[data-ag-tb] .tb-pick{height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:inherit;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:7px;cursor:pointer;transition:border-color .15s}
+[data-ag-tb] .tb-pick:hover,[data-ag-tb] .tb-pick[aria-expanded="true"]{border-color:#3fd0e0}
+[data-ag-tb] .tb-pick .chev{color:var(--muted);transition:transform .2s}
+[data-ag-tb] .tb-pick[aria-expanded="true"] .chev{transform:rotate(180deg)}
+[data-ag-tb] .tb-menu{position:absolute;top:42px;right:0;z-index:50;min-width:200px;max-height:300px;overflow-y:auto;padding:6px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 18px 36px -14px rgba(0,0,0,.7)}
+[data-ag-tb] .tb-menu button{display:block;width:100%;text-align:left;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+[data-ag-tb] .tb-menu button:hover{background:var(--hover)}
+[data-ag-page] .tb-count{font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap}
+[data-ag-page]{padding:10px 10px 8px;border-radius:16px;border:1px solid var(--line);background:var(--surface-2)}
+[data-ag-page] [data-ag-paper]{min-height:520px;margin:0;padding:40px 52px;box-sizing:border-box;border-radius:6px;background:#fff;color:#202a2f;font-family:'Source Serif 4',Georgia,serif;font-size:16px;line-height:1.8;outline:none;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+[data-ag-page] [data-ag-paper]:focus{box-shadow:0 0 0 3px rgba(63,208,224,.45),0 8px 24px rgba(0,0,0,.18)}
+[data-ag-paper] p,[data-ag-paper] div{margin:0 0 10px}
+[data-ag-paper] h1{font-size:1.45em;margin:4px 0 12px}
+[data-ag-paper] h2{font-size:1.2em;margin:14px 0 8px}
+[data-ag-paper] h3{font-size:1.05em;margin:12px 0 6px}
+[data-ag-paper] ul,[data-ag-paper] ol{margin:0 0 10px;padding-left:1.6em}
+[data-ag-paper] blockquote{margin:0 0 10px;padding:4px 0 4px 14px;border-left:3px solid #9fb6b2;color:#4a5a5e}
+[data-ag-paper] hr{border:0;border-top:1px solid #d9dfe0;margin:14px 0}
+[data-ag-paper] a{color:#1a5fb4;text-decoration:underline}`;
+
+/* The header's title field: reads as the page's subtitle until touched. */
+const AG_TITLE_CSS = `.ag-nav{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 20px;border-radius:999px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;transition:background .2s,border-color .2s,color .2s,filter .2s,transform .12s}
+.ag-nav svg{transition:transform .2s}
+.ag-nav:active{transform:scale(.96)}
+.ag-nav:focus-visible{outline:2px solid #3fd0e0;outline-offset:2px}
+.ag-nav.back{border:1px solid var(--line-strong);background:transparent;color:var(--ink)}
+.ag-nav.back:hover{background:var(--surface);border-color:var(--muted)}
+.ag-nav.back:hover svg{transform:translateX(-3px)}
+.ag-nav.next{border:0;background:linear-gradient(135deg,#12897f,#1c9c66);color:#fff;box-shadow:0 8px 20px -10px rgba(28,156,102,.85)}
+.ag-nav.next:hover{filter:brightness(1.08)}
+.ag-nav.next:hover svg{transform:translateX(3px)}
+.ag-back{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;transition:background .2s,border-color .2s,color .2s,transform .12s}
+.ag-back svg{transition:transform .2s}
+.ag-back:hover{background:#3ee0a1;border-color:transparent;color:#06261c}
+.ag-back:hover svg{transform:translateX(-3px)}
+.ag-back:active{transform:scale(.93)}
+.ag-back:focus-visible{outline:2px solid #3fd0e0;outline-offset:2px}
+.ag-title{display:block;width:min(560px,60vw);margin-top:2px;padding:2px 6px;margin-left:-6px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;outline:none;transition:border-color .15s,background .15s}
+.ag-title:hover{border-color:var(--line)}
+.ag-title:focus{border-color:#3fd0e0;background:var(--surface);color:var(--ink)}`;
+
+// [command, Lucide icon, title, the state that lights it]
+const TB_MARKS = [
+    ["bold", "bold", "Bold"], ["italic", "italic", "Italic"], ["underline", "underline", "Underline"],
+    ["strikeThrough", "strike", "Strikethrough"],
+    ["subscript", "subscript", "Subscript"], ["superscript", "superscript", "Superscript"],
+];
+// [name, kind]. Must match FONT_FAMILIES on the server (agreement_html).
+const TB_FONTS = [["Georgia", "Serif"], ["Times New Roman", "Serif"], ["Garamond", "Serif"],
+    ["Arial", "Sans"], ["Verdana", "Sans"], ["Tahoma", "Sans"], ["Trebuchet MS", "Sans"],
+    ["Calibri", "Sans"], ["Courier New", "Mono"]];
+const TB_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48];
+const TB_ALIGN = [
+    ["justifyLeft", "alignLeft", "Align left"], ["justifyCenter", "alignCenter", "Centre"],
+    ["justifyRight", "alignRight", "Align right"], ["justifyFull", "alignJustify", "Justify"],
+];
+const LIT_BY = ["bold", "italic", "underline", "strikeThrough", "subscript", "superscript", "justifyLeft", "justifyCenter",
+    "justifyRight", "justifyFull", "insertUnorderedList", "insertOrderedList"];
+
+/* A compact picker for the toolbar: a small button showing the current value,
+ * and a menu of choices. The menu is position:fixed, so the sideways-scrolling
+ * strip cannot clip it, and every press keeps the editor's selection (mousedown
+ * is cancelled), so the choice lands on the words that were selected. */
+const TbPicker = ({ label, icon, value, shown, width, options, onPick }) => {
+    const [open, setOpen] = useState(null);   // {top, left} while open
+    const btnRef = useRef(null);
+    const menuRef = useRef(null);
+    useEffect(() => {
+        if (!open) return undefined;
+        // Anything outside the menu closes it -- but NOT the menu's own list
+        // scrolling, which would otherwise shut it the moment it is scrolled.
+        const close = (e) => { if (!menuRef.current?.contains(e.target)) setOpen(null); };
+        const shut = () => setOpen(null);
+        document.addEventListener("mousedown", close);
+        window.addEventListener("resize", shut);
+        document.addEventListener("scroll", close, true);
+        return () => {
+            document.removeEventListener("mousedown", close);
+            window.removeEventListener("resize", shut);
+            document.removeEventListener("scroll", close, true);
+        };
+    }, [open]);
+    const toggle = () => {
+        if (open) { setOpen(null); return; }
+        const r = btnRef.current?.getBoundingClientRect();
+        setOpen(r ? { top: r.bottom + 6, left: r.left } : { top: 0, left: 0 });
+    };
+    return (
+        <>
+            <button ref={btnRef} type="button" className="tb-pk" title={label} aria-label={label}
+                aria-haspopup="listbox" aria-expanded={!!open}
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={toggle}>
+                <LIcon name={icon} size={14} />
+                <span className="v" style={{ width }}>{shown}</span>
+                <span className="chev"><LIcon name="chevronDown" size={13} /></span>
+            </button>
+            {/* In <body>: a transformed ancestor would otherwise make
+                position:fixed relative to it, not to the window. The client
+                theme's colours are on <body> too, so it is themed there. */}
+            {open && typeof document !== "undefined" && createPortal(
+                <div ref={menuRef} role="listbox" aria-label={label} className="tb-pk-menu"
+                    style={{ top: open.top, left: open.left }}
+                    onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }}>
+                    {options.map(o => (
+                        <button key={o.value} type="button" role="option" aria-selected={o.value === value}
+                            style={o.style} onClick={() => { setOpen(null); onPick(o.value); }}>
+                            <span>{o.label}</span>{o.hint && <span className="hint">{o.hint}</span>}
+                        </button>
+                    ))}
+                </div>,
+                document.body,
+            )}
+        </>
+    );
+};
+
+const AgreementEditor = ({ html, onChange }) => {
+    const ref = useRef(null);
+    const [on, setOn] = useState({});
+    const [menu, setMenu] = useState(false);
+    const canEdit = typeof document !== "undefined" && typeof document.execCommand === "function";
+
+    // The page is the source of truth while typing; it is written only when
+    // the value changes from outside, so the caret never jumps.
+    useEffect(() => {
+        if (ref.current && ref.current.innerHTML !== html) ref.current.innerHTML = html || "";
+    }, [html]);
+
+    const lightUp = useCallback(() => {
+        if (!canEdit || typeof document.queryCommandState !== "function") return;
+        const next = {};
+        for (const c of LIT_BY) { try { next[c] = document.queryCommandState(c); } catch { next[c] = false; } }
+        try { next.block = String(document.queryCommandValue("formatBlock") || "").toLowerCase(); } catch { next.block = ""; }
+        // The pickers show what the caret is in, not a placeholder.
+        try {
+            const sel = window.getSelection();
+            let el = sel?.anchorNode;
+            if (el && el.nodeType !== 1) el = el.parentElement;
+            if (el && ref.current?.contains(el)) {
+                const cs = window.getComputedStyle(el);
+                const fam = (cs.fontFamily || "").split(",")[0].trim().replace(/^['"]|['"]$/g, "");
+                next.font = (TB_FONTS.find(([f]) => f.toLowerCase() === fam.toLowerCase()) || [""])[0];
+                next.size = String(Math.round(parseFloat(cs.fontSize) || 16));
+            }
+        } catch { /* no computed style: keep the pickers as they are */ }
+        setOn(prev => ({ ...prev, ...next }));
+    }, [canEdit]);
 
     useEffect(() => {
-        if (!menu) return;
-        const close = () => setMenu(null);
+        const onSel = () => {
+            const sel = typeof window !== "undefined" && window.getSelection ? window.getSelection() : null;
+            if (sel && ref.current && sel.anchorNode && ref.current.contains(sel.anchorNode)) lightUp();
+        };
+        document.addEventListener("selectionchange", onSel);
+        return () => document.removeEventListener("selectionchange", onSel);
+    }, [lightUp]);
+
+    useEffect(() => {
+        if (!menu) return undefined;
+        const close = () => setMenu(false);
         document.addEventListener("click", close);
         return () => document.removeEventListener("click", close);
     }, [menu]);
 
-    /* Splice at the caret and put it back where the writer expects it. Without
-       restoring the selection the cursor jumps to the end on every action,
-       which makes the bar unusable for anything but appending. */
-    const edit = (fn) => {
-        const el = textareaRef.current;
-        const start = el ? el.selectionStart : body.length;
-        const end = el ? el.selectionEnd : body.length;
-        const out = fn({
-            before: body.slice(0, start),
-            selected: body.slice(start, end),
-            after: body.slice(end),
-            start, end,
-        });
-        if (out === undefined) return;
-        setBody(out.text);
-        // Not `requestAnimationFrame` directly: it is absent in jsdom and in a
-        // server render, and an unguarded call turns a caret nicety into a
-        // TypeError that kills the handler.
-        const afterPaint = typeof requestAnimationFrame === "function"
-            ? requestAnimationFrame : (f) => setTimeout(f, 0);
-        afterPaint(() => {
-            if (!el) return;
-            el.focus();
-            const a = out.selStart ?? out.caret ?? out.text.length;
-            const b = out.selEnd ?? a;
-            el.setSelectionRange(a, b);
-        });
+    const sync = () => { if (ref.current) onChange(ref.current.innerHTML); lightUp(); };
+    const run = (command, value = null) => {
+        ref.current?.focus();
+        if (canEdit) { try { document.execCommand(command, false, value); } catch { /* unsupported: no-op */ } }
+        sync();
     };
-
-    const insert = (snippet) => edit(({ before, after }) => ({
-        text: before + snippet + after,
-        caret: before.length + snippet.length,
-    }));
-
-    /* Prefix every selected line, so it works on a block as well as one line. */
-    const prefixLines = (mark) => edit(({ before, selected, after }) => {
-        const target = selected || "";
-        const marked = target
-            ? target.split("\n").map(l => (l.trim() ? `${mark}${l}` : l)).join("\n")
-            : mark;
-        return { text: before + marked + after, caret: before.length + marked.length };
-    });
-
-    /* Numbered list continues whatever numbering is already above the caret,
-       rather than restarting at 1 halfway down a document. */
-    const numberedItem = () => edit(({ before, after }) => {
-        const seen = [...before.matchAll(/^\s*(\d+)\./gm)].map(m => Number(m[1]));
-        const n = (seen.length ? Math.max(...seen) : 0) + 1;
-        const pad = before && !before.endsWith("\n") ? "\n" : "";
-        const snippet = `${pad}${n}. `;
-        return { text: before + snippet + after, caret: before.length + snippet.length };
-    });
-
-    const heading = () => edit(({ before, after }) => {
-        const pad = before && !before.endsWith("\n\n")
-            ? (before.endsWith("\n") ? "\n" : "\n\n") : "";
-        const snippet = `${pad}[SECTION TITLE]\n`;
-        return { text: before + snippet + after, caret: before.length + snippet.length };
-    });
-
-    /* Whole-line operations. The caret rarely sits on a line boundary, so each
-       one first widens the range to the lines it touches. */
-    const lineRange = (text, start, end) => {
-        const from = text.lastIndexOf("\n", start - 1) + 1;
-        const nl = text.indexOf("\n", end);
-        return [from, nl === -1 ? text.length : nl];
-    };
-
-    const duplicateLine = () => edit(({ start, end }) => {
-        const [a, b] = lineRange(body, start, end);
-        const line = body.slice(a, b);
-        return {
-            text: body.slice(0, b) + "\n" + line + body.slice(b),
-            caret: b + 1 + line.length,
-        };
-    });
-
-    const moveLine = (dir) => edit(({ start, end }) => {
-        const [a, b] = lineRange(body, start, end);
-        const block = body.slice(a, b);
-        if (dir < 0) {
-            if (a === 0) return undefined;
-            const prevStart = body.lastIndexOf("\n", a - 2) + 1;
-            const prev = body.slice(prevStart, a - 1);
-            const text = body.slice(0, prevStart) + block + "\n" + prev + body.slice(b);
-            return { text, selStart: prevStart, selEnd: prevStart + block.length };
+    // Text at the caret. Where the browser has no editing commands it is
+    // appended as a paragraph, so the button never silently does nothing.
+    const insertText = (text) => {
+        ref.current?.focus();
+        let done = false;
+        if (canEdit) { try { done = document.execCommand("insertText", false, text); } catch { done = false; } }
+        if (!done && ref.current) {
+            const p = document.createElement("p");
+            p.textContent = text;
+            ref.current.appendChild(p);
         }
-        if (b >= body.length) return undefined;
-        const nextEnd = body.indexOf("\n", b + 1);
-        const stop = nextEnd === -1 ? body.length : nextEnd;
-        const next = body.slice(b + 1, stop);
-        const text = body.slice(0, a) + next + "\n" + block + body.slice(stop);
-        const at = a + next.length + 1;
-        return { text, selStart: at, selEnd: at + block.length };
-    });
-
-    /* Case changes apply to the selection, or to the current line when there is
-       none -- doing nothing would look like a broken button. */
-    const changeCase = (fn) => edit(({ before, selected, after, start, end }) => {
-        if (selected) {
-            const out = fn(selected);
-            return { text: before + out + after,
-                     selStart: start, selEnd: start + out.length };
-        }
-        const [a, b] = lineRange(body, start, end);
-        const out = fn(body.slice(a, b));
-        return { text: body.slice(0, a) + out + body.slice(b),
-                 selStart: a, selEnd: a + out.length };
-    });
-
-    const matches = find ? body.split(find).length - 1 : 0;
-
-    const replaceNext = () => {
-        if (!find) return;
-        const el = textareaRef.current;
-        const from = el ? el.selectionEnd : 0;
-        let at = body.indexOf(find, from);
-        if (at === -1) at = body.indexOf(find);      // wrap around
-        if (at === -1) return;
-        const text = body.slice(0, at) + repl + body.slice(at + find.length);
-        setBody(text);
-        const afterPaint = typeof requestAnimationFrame === "function"
-            ? requestAnimationFrame : (f) => setTimeout(f, 0);
-        afterPaint(() => {
-            if (!el) return;
-            el.focus();
-            el.setSelectionRange(at, at + repl.length);
-        });
+        sync();
     };
 
-    const replaceAll = () => { if (find) setBody(body.split(find).join(repl)); };
+    /* The browser writes font, size and colour as legacy <font> tags. They are
+       turned into <span style> here -- the only form the server keeps -- with
+       the size taken from the picker, never from the browser's 1-7 scale. */
+    const fontsToSpans = (px) => {
+        if (!ref.current) return;
+        const made = [];
+        for (const f of [...ref.current.querySelectorAll("font")]) {
+            const span = document.createElement("span");
+            const st = [];
+            if (f.getAttribute("face")) st.push(`font-family:${f.getAttribute("face")}`);
+            if (px && f.getAttribute("size") === "7") st.push(`font-size:${px}px`);
+            if (f.getAttribute("color")) st.push(`color:${f.getAttribute("color")}`);
+            if (st.length) span.setAttribute("style", st.join(";"));
+            while (f.firstChild) span.appendChild(f.firstChild);
+            f.replaceWith(span);
+            made.push(span);
+        }
+        // Replacing the elements drops the selection; put it back over the
+        // same words, so a font, size and colour can be chosen one after
+        // another on one selection.
+        if (made.length && typeof window !== "undefined" && window.getSelection && document.createRange) {
+            const range = document.createRange();
+            range.setStartBefore(made[0]);
+            range.setEndAfter(made[made.length - 1]);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+    };
+    /* Sub- and superscript at a bare caret: the browser nests a second one
+       instead of turning it off, so the caret is stepped out of the element. */
+    const script = (command) => {
+        const tag = command === "subscript" ? "SUB" : "SUP";
+        const sel = typeof window !== "undefined" && window.getSelection ? window.getSelection() : null;
+        if (sel && sel.isCollapsed && sel.anchorNode && ref.current?.contains(sel.anchorNode)) {
+            let el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+            while (el && el !== ref.current && el.tagName !== tag) el = el.parentElement;
+            if (el && el !== ref.current) {
+                const after = document.createTextNode("\u200b");
+                el.after(after);
+                const range = document.createRange();
+                range.setStart(after, 1);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                sync();
+                return;
+            }
+        }
+        run(command);
+    };
+    const runFont = (command, value, px) => {
+        ref.current?.focus();
+        if (canEdit) {
+            try { document.execCommand("styleWithCSS", false, false); } catch { /* not supported */ }
+            try { document.execCommand(command, false, value); } catch { /* unsupported: no-op */ }
+        }
+        fontsToSpans(px);
+        sync();
+    };
+    const heading = (h) => run("formatBlock", on.block === h ? "<p>" : `<${h}>`);
+    const addLink = () => {
+        const url = typeof window !== "undefined" && window.prompt
+            ? (window.prompt("Link address (https://… or mailto:…)", "https://") || "").trim() : "";
+        if (!url) return;
+        if (!/^(https?:\/\/|mailto:)[^\s"'<>]+$/i.test(url)) {
+            if (typeof window !== "undefined" && window.alert) window.alert("Use a web address starting https:// or http://, or mailto:");
+            return;
+        }
+        const sel = typeof window !== "undefined" && window.getSelection ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed) run("createLink", url);
+        else run("insertHTML", `<a href="${url.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}">${url.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</a>`);
+    };
+    const [colour, setColour] = useState("#c0392b");
 
-    const sep = <div style={{ width: 1, height: 22, background: t.border, margin: "0 4px" }} />;
-
-    const btn = (label, title, onClick, opts = {}) => (
-        <button type="button" title={title} disabled={opts.disabled}
-            onClick={e => { e.preventDefault(); onClick(); }}
-            style={{
-                minWidth: 32, height: 30, padding: "0 9px", borderRadius: 8,
-                border: "none",
-                background: opts.active ? t.primaryGlow : "transparent",
-                color: opts.disabled ? t.textFaint : opts.active ? t.primary : t.text,
-                cursor: opts.disabled ? "not-allowed" : "pointer",
-                fontSize: opts.size || 13, fontWeight: opts.weight || 600,
-                fontFamily: "inherit", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 6, whiteSpace: "nowrap",
-            }}
-            onMouseEnter={e => { if (!opts.disabled && !opts.active) e.currentTarget.style.background = t.inputBg; }}
-            onMouseLeave={e => { if (!opts.active) e.currentTarget.style.background = "transparent"; }}
-        >{label}</button>
+    const btn = (key, label, title, onClick, lit) => (
+        <button key={key} type="button" className="tb-btn" title={title} aria-label={title}
+            aria-pressed={lit === undefined ? undefined : !!lit} data-on={lit ? "true" : undefined}
+            onMouseDown={e => e.preventDefault()} onClick={onClick}>{label}</button>
     );
-
-    const dropdown = (key, label, items, onPick) => (
-        <div style={{ position: "relative" }}>
-            <button type="button"
-                onClick={e => { e.stopPropagation(); setMenu(menu === key ? null : key); }}
-                style={{
-                    height: 30, padding: "0 11px", borderRadius: 8,
-                    border: `1px solid ${menu === key ? t.primary : t.border}`,
-                    background: menu === key ? t.primaryGlow : "transparent",
-                    color: menu === key ? t.primary : t.text,
-                    cursor: "pointer", fontSize: 12.5, fontWeight: 600,
-                    fontFamily: "inherit", display: "flex", alignItems: "center", gap: 7,
-                }}>
-                {label} <span style={{ fontSize: 9, opacity: 0.8 }}>▼</span>
-            </button>
-            {menu === key && (
-                <div onClick={e => e.stopPropagation()} style={{
-                    position: "absolute", top: 35, left: 0, zIndex: 50,
-                    minWidth: 190, maxHeight: 300, overflowY: "auto",
-                    background: t.card, border: `1px solid ${t.border}`,
-                    borderRadius: 12, boxShadow: t.shadowCard, padding: "5px 0",
-                }}>
-                    {items.map((it, i) => (
-                        <button key={i} type="button"
-                            onClick={() => { setMenu(null); onPick(it); }}
-                            style={{
-                                display: "block", width: "100%", textAlign: "left",
-                                padding: "8px 14px", background: "transparent",
-                                border: "none", color: t.text, fontSize: 12.5,
-                                cursor: "pointer", fontFamily: "inherit",
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = t.inputBg}
-                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                        >{it.label}</button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-
-    const findInput = (value, onChange, placeholder) => (
-        <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-            style={{
-                height: 30, padding: "0 10px", borderRadius: 8, minWidth: 130,
-                background: t.inputBg, border: `1px solid ${t.border}`,
-                color: t.text, fontSize: 12.5, outline: "none", fontFamily: "inherit",
-            }} />
-    );
-
-    const used = body.length;
+    const sep = (k) => <span key={k} className="tb-sep" aria-hidden="true" />;
+    const used = (html || "").length;
     const near = used > MAX_BODY_CHARS * 0.9;
 
     return (
-        <div style={{ borderBottom: `1px solid ${t.border}`, background: t.surface }}>
-            <div style={{
-                display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap",
-                padding: "7px 10px",
-            }}>
-                {/* Structure */}
-                {btn("¶", "Section heading", heading, { size: 15 })}
-                {btn("1.", "Numbered item", numberedItem, { weight: 700 })}
-                {btn("•", "Bullet the selected lines", () => prefixLines("  • "), { size: 15 })}
-                {btn("⇥", "Indent the selected lines", () => prefixLines("    "), { size: 14 })}
-                {sep}
-
-                {/* Editing */}
-                {btn("🔍", "Find and replace", () => setFindOpen(v => !v),
-                     { size: 13, active: findOpen })}
-                {dropdown("case", "Aa Case", CASES, c => changeCase(c.fn))}
-                {btn("⧉", "Duplicate this line", duplicateLine, { size: 14 })}
-                {btn("↑", "Move this line up", () => moveLine(-1), { size: 14 })}
-                {btn("↓", "Move this line down", () => moveLine(1), { size: 14 })}
-                {sep}
-
-                {dropdown("insert", "＋ Insert", INSERTABLES, it => insert(it.build()))}
-                {sep}
-
-                {btn("↶", "Undo", onUndo, { size: 15, disabled: !canUndo })}
-                {btn("↷", "Redo", onRedo, { size: 15, disabled: !canRedo })}
-
-                <div style={{ flex: 1, minWidth: 8 }} />
-
-                {/* Text size is a reading preference: it changes nothing in the
-                    document that gets signed. */}
-                <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                    {btn("Aa−", "Smaller text", () => setZoom(z => Math.max(12, z - 1)), { size: 12 })}
-                    <span style={{ fontSize: 11.5, color: t.textMuted, minWidth: 24, textAlign: "center" }}>{zoom}</span>
-                    {btn("Aa+", "Larger text", () => setZoom(z => Math.min(22, z + 1)), { size: 12 })}
+        <>
+            <style>{AG_TB_CSS}</style>
+            <div data-ag-tb="">
+                {/* Scrolls sideways with no visible bar; a mouse wheel over it
+                    moves it along, since a plain wheel has no sideways axis. */}
+                <div className="tb-scroll" role="toolbar" aria-label="Text formatting"
+                    onWheel={e => {
+                        const el = e.currentTarget;
+                        if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
+                    }}>
+                    {btn("undo", <LIcon name="undo" size={18} />, "Undo", () => run("undo"))}
+                    {btn("redo", <LIcon name="redo" size={18} />, "Redo", () => run("redo"))}
+                    {sep("s1")}
+                    <TbPicker label="Font" icon="type" width={64}
+                        value={on.font || ""} shown={on.font || "Default"}
+                        options={TB_FONTS.map(([f, kind]) => ({ value: f, label: f, hint: kind, style: { fontFamily: f } }))}
+                        onPick={f => runFont("fontName", f)} />
+                    <TbPicker label="Text size" icon="textSize" width={20}
+                        value={String(on.size || "16")} shown={on.size || "16"}
+                        options={TB_SIZES.map(px => ({ value: String(px), label: String(px), hint: px === 16 ? "Normal" : null }))}
+                        onPick={px => runFont("fontSize", "7", +px)} />
+                    <label className="tb-btn tb-color" title="Text colour" aria-label="Text colour">
+                        <LIcon name="baseline" size={18} />
+                        <i style={{ background: colour }} />
+                        <input type="color" value={colour} aria-label="Pick a text colour"
+                            onChange={e => { setColour(e.target.value); runFont("foreColor", e.target.value); }} />
+                    </label>
+                    {sep("s2")}
+                    {TB_MARKS.map(([c, name, title]) => btn(c, <LIcon name={name} size={18} />, title,
+                        () => (c === "subscript" || c === "superscript" ? script(c) : run(c)), on[c]))}
+                    {sep("s3")}
+                    {TB_ALIGN.map(([c, name, title]) => btn(c, <LIcon name={name} size={18} />, title, () => run(c), on[c]))}
+                    {sep("s4")}
+                    {btn("ul", <LIcon name="list" size={18} />, "Bulleted list", () => run("insertUnorderedList"), on.insertUnorderedList)}
+                    {btn("ol", <LIcon name="listOrdered" size={18} />, "Numbered list", () => run("insertOrderedList"), on.insertOrderedList)}
+                    {sep("s5")}
+                    {["h1", "h2", "h3"].map(h => btn(h, <LIcon name={`heading${h[1]}`} size={19} />, `Heading ${h[1]}`, () => heading(h), on.block === h))}
+                    {sep("s6")}
+                    {btn("quote", <LIcon name="quote" size={17} />, "Quote", () => run("formatBlock", "<blockquote>"), on.block === "blockquote")}
+                    {btn("link", <LIcon name="link" size={17} />, "Link", addLink)}
+                    {btn("hr", <LIcon name="minus" size={18} />, "Divider", () => run("insertHorizontalRule"))}
+                    {btn("clear", <LIcon name="removeFormatting" size={18} />, "Clear formatting", () => run("removeFormat"))}
                 </div>
-                {sep}
-                <span title={`The server accepts up to ${MAX_BODY_CHARS.toLocaleString()} characters`}
-                    style={{ fontSize: 11.5, color: near ? t.warn : t.textMuted, fontWeight: near ? 700 : 500 }}>
-                    {used.toLocaleString()} / {MAX_BODY_CHARS.toLocaleString()}
-                </span>
+                {/* Outside the scrolling strip, so its menu is not clipped. */}
+                <div className="tb-drop">
+                    <button type="button" className="tb-pick" aria-haspopup="menu" aria-expanded={menu}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={e => { e.stopPropagation(); setMenu(m => !m); }}>
+                        <LIcon name="plus" size={15} /><span>Insert</span>
+                        <span className="chev" style={{ display: "inline-flex" }}><LIcon name="chevronDown" size={14} /></span>
+                    </button>
+                    {menu && (
+                        <div role="menu" className="tb-menu" onClick={e => e.stopPropagation()}>
+                            {INSERTABLES.filter(it => it.label !== "Divider").map(it => (
+                                <button key={it.label} type="button" role="menuitem"
+                                    onMouseDown={e => e.preventDefault()}
+                                    onClick={() => { setMenu(false); insertText(it.build()); }}>{it.label}</button>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
-
-            {findOpen && (
-                <div style={{
-                    display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-                    padding: "8px 12px", borderTop: `1px solid ${t.border}`,
-                    background: t.card,
-                }}>
-                    {findInput(find, setFind, "Find")}
-                    {findInput(repl, setRepl, "Replace with")}
-                    {/* The count is the useful part: it says whether the thing
-                        being replaced is actually in the document, before
-                        anything is changed. */}
-                    <span style={{ fontSize: 11.5, color: find && !matches ? t.warn : t.textMuted }}>
-                        {find ? `${matches} match${matches === 1 ? "" : "es"}` : "Type what to find"}
+            <div data-ag-page="">
+                <div ref={ref} data-ag-paper="" role="textbox" aria-multiline="true" aria-label="Agreement text"
+                    contentEditable suppressContentEditableWarning
+                    onInput={sync} onKeyUp={lightUp} onMouseUp={lightUp} />
+                <div style={{ margin: "6px 4px 0", textAlign: "right" }}>
+                    <span className="tb-count" title={`The server accepts up to ${MAX_BODY_CHARS.toLocaleString()} characters, formatting included`}
+                        style={near ? { color: "var(--gold)", fontWeight: 700 } : undefined}>
+                        {used.toLocaleString()} / {MAX_BODY_CHARS.toLocaleString()}
                     </span>
-                    <div style={{ flex: 1 }} />
-                    {btn("Replace", "Replace the next match", replaceNext,
-                         { disabled: !find || !matches, size: 12 })}
-                    {btn("Replace all", `Replace all ${matches}`, replaceAll,
-                         { disabled: !find || !matches, size: 12 })}
-                    {btn("✕", "Close find and replace", () => setFindOpen(false), { size: 13 })}
                 </div>
-            )}
-        </div>
+            </div>
+        </>
     );
 };
 
@@ -893,67 +1142,31 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
     const { user } = useAuth();
     const [step, setStep] = useState(0);
     const [title, setTitle] = useState(template?.name || "New Agreement");
-    const [body, setBody] = useState(template?.body || "");
-    const editorRef = useRef(null);
-    const [zoom, setZoom] = useState(14);
+    // HTML from here on (the rich editor). A template's plain text becomes one
+    // paragraph per line, every character escaped.
+    const [body, setBody] = useState(() => textToAgreementHtml(template?.body || ""));
+    // The Review step's copy: the SERVER's canonical form of `body`, which is
+    // what is sent, hashed and signed. {loading, body, error}.
+    const [review, setReview] = useState(null);
+    useEffect(() => {
+        if (step !== 3) return undefined;
+        let live = true;
+        setReview({ loading: true, body: null, error: null });
+        // The caret helper's zero-width spaces are not part of the agreement.
+        Promise.resolve(previewAgreementBody(body.replace(/\u200b/g, ""))).then(res => {
+            if (!live) return;
+            const clean = res?.data?.body_html;
+            if (res?.error || typeof clean !== "string") {
+                setReview({ loading: false, body: null, error: res?.error?.message || "The text could not be checked. Try again." });
+            } else if (!res.data.has_text) {
+                setReview({ loading: false, body: null, error: "The agreement has no text. Go back and write it." });
+            } else {
+                setReview({ loading: false, body: clean, error: null });
+            }
+        }).catch(() => { if (live) setReview({ loading: false, body: null, error: "The text could not be checked. Try again." }); });
+        return () => { live = false; };
+    }, [step, body]);
 
-    /* UNDO HAS TO BE OURS. A textarea keeps its own undo stack, but only while
-       the browser owns the value; once React drives it through `value` and
-       `onChange`, every programmatic edit clears that stack and Ctrl+Z jumps
-       to an empty box. So the history is explicit.
-
-       Typing is COALESCED on a short timer -- one entry per burst, not per
-       keystroke, or undo walks back a character at a time and is useless. A
-       toolbar action commits immediately, because those are the edits somebody
-       most wants to take back. */
-    const history = useRef({ past: [], future: [], timer: null });
-    const [histTick, setHistTick] = useState(0);
-
-    const pushHistory = useCallback((prev, { immediate = false } = {}) => {
-        const h = history.current;
-        const commit = () => {
-            if (h.past[h.past.length - 1] === prev) return;
-            h.past = [...h.past, prev].slice(-60);
-            h.future = [];
-            setHistTick(n => n + 1);
-        };
-        if (h.timer) { clearTimeout(h.timer); h.timer = null; }
-        if (immediate) commit();
-        else h.timer = setTimeout(commit, 450);
-    }, []);
-
-    const editBody = useCallback((next) => {
-        setBody(cur => { pushHistory(cur, { immediate: true }); return next; });
-    }, [pushHistory]);
-
-    const typeBody = useCallback((next) => {
-        setBody(cur => { pushHistory(cur); return next; });
-    }, [pushHistory]);
-
-    const undo = useCallback(() => {
-        const h = history.current;
-        if (h.timer) { clearTimeout(h.timer); h.timer = null; }
-        if (!h.past.length) return;
-        setBody(cur => {
-            const prev = h.past[h.past.length - 1];
-            h.past = h.past.slice(0, -1);
-            h.future = [cur, ...h.future].slice(0, 60);
-            setHistTick(n => n + 1);
-            return prev;
-        });
-    }, []);
-
-    const redo = useCallback(() => {
-        const h = history.current;
-        if (!h.future.length) return;
-        setBody(cur => {
-            const next = h.future[0];
-            h.future = h.future.slice(1);
-            h.past = [...h.past, cur].slice(-60);
-            setHistTick(n => n + 1);
-            return next;
-        });
-    }, []);
     // SIGNERS, not a single counterparty. The backend takes 2-3 parties
     // (MAX_PARTIES), each either a registered user or an invited email address,
     // so the wizard carries a list. The creator is implicit and is NOT in it.
@@ -1037,7 +1250,14 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
     const signatureReady = !!sig.data;
 
     const nav = (n) => {
-        if (n > step && step === 0 && !title.trim()) return;
+        if (n > step && step === 0 && !title.trim()) {
+            toast.show("⚠️ Give the agreement a title (at the top)", "warn");
+            return;
+        }
+        if (n > step && step === 0 && !agreementPlainText(body)) {
+            toast.show("⚠️ Write the agreement before adding signers", "warn");
+            return;
+        }
         if (n > 1 && step === 1 && !signersReady) {
             toast.show(signers.length
                 ? "⚠️ Give every invited signer a valid email address"
@@ -1060,14 +1280,18 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
             {/* Header */}
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <button onClick={() => onNavigate("templates")} style={{
-                        width: 36, height: 36, borderRadius: 10, border: `1.5px solid ${t.border}`,
-                        background: t.inputBg, color: t.textMuted, fontSize: 14, cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>←</button>
+                    <button type="button" className="ag-back" onClick={() => onNavigate("templates")}
+                        aria-label="Back to templates" title="Back to templates">
+                        <LIcon name="back" size={18} stroke={2} />
+                    </button>
                     <div>
-                        <h2 style={{ fontSize: 20, fontWeight: 800, color: t.text, margin: 0, fontFamily: "'Sora','Inter',sans-serif" }}>Create Agreement</h2>
-                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 1 }}>{template?.name || "Custom"}</div>
+                        <h2 style={{ fontSize: 21, fontWeight: 800, color: t.text, margin: 0, fontFamily: "inherit", letterSpacing: "-.01em" }}>Create Agreement</h2>
+                        {/* The agreement's title, edited in place: the separate
+                            title box above the editor was removed (2026-10-11)
+                            so the editor's toolbar sits where it was. */}
+                        <style>{AG_TITLE_CSS}</style>
+                        <input className="ag-title" aria-label="Agreement title" placeholder="Agreement title"
+                            value={title} maxLength={300} onChange={e => setTitle(e.target.value)} />
                     </div>
                 </div>
                 {/* "Save Draft" was here and it saved nothing -- it showed
@@ -1084,59 +1308,9 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
             {/* ── STEP 0: Edit Agreement ── */}
             {step === 0 && (
                 <div>
-                    <div style={{ marginBottom: 16 }}>
-                        <div style={{
-                            fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: "uppercase",
-                            letterSpacing: "0.7px", marginBottom: 6
-                        }}>Agreement Title</div>
-                        <Input value={title} onChange={e => setTitle(e.target.value)}
-                            style={{ fontSize: 15, fontWeight: 600, padding: "14px 16px" }} />
-                    </div>
-                    {/* Editor */}
-                    <Card style={{ padding: 0, overflow: "hidden" }}>
-                        {/* A DRAFTING bar, not a formatting one. Every control
-                            here writes characters into the document, because
-                            characters are all a signed plain-text agreement can
-                            carry. The 24-button bold/italic/align bar that used
-                            to sit here had no handlers at all and promised
-                            styling this editor cannot produce -- see the note at
-                            TOOLBAR_ACTIONS. */}
-                        <DraftingToolbar
-                            body={body} setBody={editBody} textareaRef={editorRef}
-                            zoom={zoom} setZoom={setZoom}
-                            onUndo={undo} onRedo={redo}
-                            canUndo={history.current.past.length > 0}
-                            canRedo={history.current.future.length > 0}
-                        />
-                        <div style={{
-                            padding: "6px 14px", borderBottom: `1px solid ${t.border}`,
-                            background: t.surface, fontSize: 11, color: t.textMuted,
-                        }}>
-                            Plain text — the signed agreement is exactly these characters.
-                        </div>
-                        {/* Body */}
-                        <textarea
-                            ref={editorRef}
-                            value={body}
-                            onChange={e => typeBody(e.target.value)}
-                            onKeyDown={e => {
-                                // The browser's own Ctrl+Z would restore a value
-                                // React is not tracking, so it is redirected to
-                                // the history above rather than left to fight it.
-                                const mod = e.ctrlKey || e.metaKey;
-                                if (mod && e.key.toLowerCase() === "z") {
-                                    e.preventDefault();
-                                    if (e.shiftKey) redo(); else undo();
-                                } else if (mod && e.key.toLowerCase() === "y") {
-                                    e.preventDefault(); redo();
-                                }
-                            }}
-                            style={{
-                                width: "100%", minHeight: 380, background: t.card, border: "none", color: t.text,
-                                fontSize: zoom, lineHeight: 1.8, padding: "20px 24px", outline: "none", resize: "vertical",
-                                fontFamily: "Georgia, 'Times New Roman', serif", boxSizing: "border-box",
-                            }} />
-                    </Card>
+                    {/* The editor brings its own toolbar bar and page; no card
+                        around them, which would also stop the bar sticking. */}
+                    <AgreementEditor html={body} onChange={setBody} />
                 </div>
             )}
 
@@ -1281,96 +1455,11 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
 
             {/* ── STEP 2: Your Signature ── */}
             {step === 2 && (
-                <div style={{ maxWidth: 780 }}>
-
-                    {/* ── Top info row ── */}
-                    <div className="rgrid-2" style={{
-                        display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 22,
-                    }}>
-                        {/* Creator info card */}
-                        <div style={{
-                            display: "flex", alignItems: "flex-start", gap: 14, padding: "16px 18px",
-                            borderRadius: 14, background: t.primaryGlow2,
-                            border: `1.5px solid ${t.primary}30`,
-                        }}>
-                            <div style={{
-                                width: 40, height: 40, borderRadius: 12, background: t.primaryGlow,
-                                border: `1.5px solid ${t.primary}50`,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 20, flexShrink: 0,
-                            }}>✍️</div>
-                            <div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>
-                                    Sign as creator
-                                </div>
-                                <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                                    Your signature is applied first, then{" "}
-                                    <span style={{ color: t.primary, fontWeight: 700 }}>
-                                        {signers.length === 0
-                                            ? "the other party"
-                                            : signers.map(sg => sg.name || sg.email || "your signer").join(" and ")}
-                                    </span>{" "}
-                                    {signers.length > 1 ? "are" : "is"} asked to counter-sign.
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Security card */}
-                        <div style={{
-                            display: "flex", alignItems: "flex-start", gap: 14, padding: "16px 18px",
-                            borderRadius: 14, background: `${t.success}0D`,
-                            border: `1.5px solid ${t.success}30`,
-                        }}>
-                            <div style={{
-                                width: 40, height: 40, borderRadius: 12,
-                                background: `${t.success}18`, border: `1.5px solid ${t.success}40`,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: 20, flexShrink: 0,
-                            }}>🔒</div>
-                            <div>
-                                {/* Two claims used to sit here, both unsupported:
-                                    "AES-256 encrypted" and "Compliant with
-                                    e-signature laws". Signatures are stored as
-                                    plaintext base64 (agreement_repo.update_party_
-                                    signature); the only encryption in the system
-                                    is Fernet/AES-128 over CNICs. And whether an
-                                    instrument complies with ETO 2002 is a legal
-                                    conclusion no lawyer has reviewed.
-                                    Telling someone their signature is encrypted
-                                    and legally compliant, in the panel where they
-                                    decide to sign, is the worst place in the
-                                    product to be wrong. What is left is true. */}
-                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>
-                                    What we record
-                                </div>
-                                <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                                    On submission, we record your account, timestamp, IP address,
-                                    and the agreement content hash.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* ── Full name ── */}
-                    <div style={{ marginBottom: 20 }}>
-                        <div style={{
-                            fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                            letterSpacing: "0.8px", marginBottom: 8,
-                        }}>Your Full Name</div>
-                        <div style={{ position: "relative" }}>
-                            <span style={{
-                                position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)",
-                                fontSize: 16, pointerEvents: "none",
-                            }}>👤</span>
-                            <Input
-                                placeholder="Enter your full name..."
-                                value={fullName}
-                                onChange={e => setFullName(e.target.value)}
-                                style={{ fontSize: 14, padding: "13px 16px 13px 42px" }}
-                            />
-                        </div>
-                    </div>
-
+                /* Two columns that use the width (2026-10-11): the pad, which is
+                   the work, on the left; who signs and what is recorded on the
+                   right. It was one 780px column with dead space beside it. */
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px", gap: 18, alignItems: "start" }}>
+                  <div style={{ minWidth: 0 }}>
                     {/* ── Signature card ── */}
                     <div style={{
                         borderRadius: 18, overflow: "hidden",
@@ -1389,8 +1478,8 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                 <div style={{
                                     width: 32, height: 32, borderRadius: 9, background: t.primaryGlow,
-                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15,
-                                }}>✍️</div>
+                                    display: "flex", alignItems: "center", justifyContent: "center", color: t.primary,
+                                }}><LIcon name="pencil" size={16} /></div>
                                 <div>
                                     <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Your Signature</div>
                                     <div style={{ fontSize: 10, color: t.textMuted }}>
@@ -1402,7 +1491,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                         </div>
 
                         <div style={{ padding: "16px 18px" }}>
-                            <SignaturePad height={200} onChange={setSig} />
+                            <SignaturePad height={260} onChange={setSig} />
                         </div>
 
                         {/* Footer strip */}
@@ -1413,7 +1502,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                             background: t.surface,
                         }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.textMuted }}>
-                                <span>🔒</span>
+                                <LIcon name="shield" size={13} />
                                 <span>Signature encrypted at rest with AES-256-GCM · timestamped on submission</span>
                             </div>
                             {sig.data && (
@@ -1426,7 +1515,70 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                             )}
                         </div>
                     </div>
+                  </div>
 
+                  <aside style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {/* ── Full name ── */}
+                    <div style={{ padding: "14px 16px", borderRadius: 16, background: t.card, border: `1px solid ${t.border}` }}>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>
+                            Your full name
+                        </label>
+                        <div style={{ position: "relative" }}>
+                            <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: t.textMuted, display: "flex", pointerEvents: "none" }}>
+                                <LIcon name="type" size={15} />
+                            </span>
+                            <Input
+                                placeholder="As it should appear"
+                                value={fullName}
+                                onChange={e => setFullName(e.target.value)}
+                                style={{ fontSize: 14, padding: "11px 14px 11px 38px" }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* ── Who signs, in order ── */}
+                    <div style={{ padding: "14px 16px", borderRadius: 16, background: t.card, border: `1px solid ${t.border}` }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>Sign as creator</div>
+                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55, marginBottom: 12 }}>
+                            Your signature is applied first, then the others are asked to counter-sign.
+                        </div>
+                        {[{ name: fullName || "You", note: "Signs now", you: true },
+                          ...signers.map(sg => ({ name: sg.name || sg.email || "Your signer", note: sg.kind === "email" ? "Invited by email" : "Signs in the app" }))
+                        ].map((p, i, all) => (
+                            <div key={i} style={{ display: "flex", gap: 10, position: "relative", paddingBottom: i < all.length - 1 ? 12 : 0 }}>
+                                {i < all.length - 1 && <i style={{ position: "absolute", left: 13, top: 28, bottom: 0, width: 2, background: t.border }} />}
+                                <span style={{
+                                    width: 28, height: 28, flexShrink: 0, borderRadius: "50%", zIndex: 1,
+                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800,
+                                    background: p.you ? t.primary : t.surface, color: p.you ? "#06261c" : t.textMuted,
+                                    border: p.you ? "none" : `1.5px solid ${t.border}`,
+                                }}>{i + 1}</span>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                                    <div style={{ fontSize: 11.5, color: t.textMuted }}>{p.note}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* ── What is recorded ── */}
+                    <div style={{ display: "flex", gap: 12, padding: "14px 16px", borderRadius: 16, background: `${t.success}0D`, border: `1px solid ${t.success}30` }}>
+                        <span style={{ color: t.success, display: "flex", marginTop: 1 }}><LIcon name="shield" size={18} /></span>
+                        <div>
+                            {/* Two claims used to sit here, both unsupported:
+                                "AES-256 encrypted" and "Compliant with
+                                e-signature laws". Whether an instrument complies
+                                with ETO 2002 is a legal conclusion no lawyer has
+                                reviewed, and this panel is the worst place in
+                                the product to be wrong. What is left is true. */}
+                            <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>What we record</div>
+                            <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55 }}>
+                                On submission, we record your account, timestamp, IP address,
+                                and the agreement content hash.
+                            </div>
+                        </div>
+                    </div>
+                  </aside>
                 </div>
             )}
 
@@ -1441,12 +1593,17 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                             <span style={{ fontSize: 16 }}>📄</span>
                             <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{title}</span>
                         </div>
-                        <div style={{
-                            padding: "20px 24px", fontSize: 13.5, lineHeight: 1.85, color: t.text,
-                            fontFamily: "Georgia, 'Times New Roman', serif", maxHeight: 420, overflowY: "auto",
-                            whiteSpace: "pre-wrap"
-                        }}>
-                            {body || "(No content)"}
+                        {/* The server's canonical form: exactly what will be
+                            hashed and signed, not the editor's raw markup. */}
+                        <div style={{ padding: "20px 24px", maxHeight: 420, overflowY: "auto" }}>
+                            {review?.loading ? (
+                                <div style={{ fontSize: 13, color: t.textMuted }}>Checking the text…</div>
+                            ) : review?.error ? (
+                                <div style={{ fontSize: 13, color: t.danger }}>{review.error}</div>
+                            ) : (
+                                <AgreementBody body={review?.body} format="html" empty="(No content)"
+                                    style={{ fontSize: 13.5, lineHeight: 1.85, color: t.text, fontFamily: "Georgia, 'Times New Roman', serif" }} />
+                            )}
                         </div>
                     </Card>
 
@@ -1583,19 +1740,21 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 marginTop: 24, paddingTop: 20, borderTop: `1px solid ${t.border}`
             }}>
-                <Btn outline onClick={() => step > 0 ? nav(step - 1) : onNavigate("templates")}
-                    style={{ padding: "11px 20px" }}>
-                    ← {step === 0 ? "Back" : "Back"}
-                </Btn>
+                <button type="button" className="ag-nav back" onClick={() => step > 0 ? nav(step - 1) : onNavigate("templates")}>
+                    <LIcon name="back" size={16} stroke={2.2} /><span>Back</span>
+                </button>
                 <span style={{ fontSize: 12, color: t.textMuted }}>Step {step + 1} of {STEPS.length}</span>
                 {step < 3
-                    ? <Btn primary onClick={() => nav(step + 1)} style={{ padding: "11px 24px" }}>Next →</Btn>
+                    ? <button type="button" className="ag-nav next" onClick={() => nav(step + 1)}>
+                        <span>Next</span><LIcon name="arrowRight" size={16} stroke={2.2} />
+                    </button>
                     : <Btn primary disabled={submitting} onClick={async () => {
                         if (!user?._id) { toast.show("⚠️ Please log in first", "warn"); return; }
                         if (!signersReady) {
                             toast.show("⚠️ Add at least one other signer (Step 2)", "warn"); return;
                         }
                         if (!sig.data) { toast.show("⚠️ Please add your signature first", "warn"); return; }
+                        if (!review?.body) { toast.show("⚠️ " + (review?.error || "The text is still being checked"), "warn"); return; }
                         setSendError(null);
                         setSubmitting(true);
                         try {
@@ -1609,7 +1768,9 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                             // agreement instead of a second one.
                             const res = await createAgreement({
                                 title,
-                                body_html: body,
+                                // What Review showed, not the editor's markup.
+                                body_html: review.body,
+                                body_format: "html",
                                 party_ids: signers.map(sg => sg.kind === "user"
                                     ? { user_id: sg.user_id }
                                     : { email: sg.email.trim(), full_name: sg.name?.trim() || null }),
@@ -1676,7 +1837,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                             setSubmitting(false);
                         }
                     }} style={{ padding: "11px 24px" }}>
-                        {submitting ? "⏳ Sending…" : "✈️ Sign & Send"}
+                        {submitting ? "Sending…" : <><LIcon name="send" size={15} stroke={2} />{" "}Sign & Send</>}
                     </Btn>
                 }
             </div>
@@ -1856,28 +2017,28 @@ const RowMenu = ({ agreement, archivedView, onOpen, onDownload, onArchive, onUna
                     background: t.card, border: `1px solid ${t.border}`,
                     borderRadius: 12, boxShadow: t.shadowCard, padding: "5px 0",
                 }}>
-                    {item("\ud83d\udcc4  Open", onOpen)}
+                    {item("Open", onOpen)}
                     {/* Only once EXECUTED. The server refuses a PDF before every
                         party has signed, so offering it earlier would be an
                         action that always fails. */}
                     {agreement.rawStatus === "executed" &&
-                        item("\u2b07\ufe0f  Download PDF", onDownload)}
+                        item("Download PDF", onDownload)}
                     <div style={{ height: 1, background: t.border, margin: "5px 0" }} />
                     {archivedView
-                        ? item("\u21a9\ufe0f  Restore to my list", onUnarchive)
-                        : item("\ud83d\uddd1\ufe0f  Remove from my list", onArchive, t.danger)}
+                        ? item("Restore to my list", onUnarchive)
+                        : item("Remove from my list", onArchive, t.danger)}
                 </div>
             )}
         </div>
     );
 };
 
-const PageAllAgreements = ({ onNavigate }) => {
+const PageAllAgreements = ({ onNavigate, initialFilter = "All" }) => {
     const t = useTheme();
     const toast = useToast();
     const { user } = useAuth();
     const [search, setSearch] = useState("");
-    const [filter, setFilter] = useState("All");
+    const [filter, setFilter] = useState(initialFilter);
     // "Archived" is a VIEW, not a status: it crosses the four real ones, so
     // it cannot be another pill in the same group without implying an
     // agreement is either pending or archived rather than both.
@@ -1929,7 +2090,7 @@ const PageAllAgreements = ({ onNavigate }) => {
                      error: error?.message || "This agreement could not be loaded." });
             return;
         }
-        setDoc({ loading: false, body: data.body_html ?? "",
+        setDoc({ loading: false, body: data.body_html ?? "", format: data.body_format,
                  eto: data.eto_classification,
                  expiresAt: data.expires_at || null, error: null });
     };
@@ -2018,6 +2179,7 @@ const PageAllAgreements = ({ onNavigate }) => {
     const filtered = agmts.filter(a =>
         a.name.toLowerCase().includes(search.toLowerCase())
     );
+    const needMine = agmts.filter(a => a.needsMySig).length;
 
     const doSign = async () => {
         if (!signSig.data) {
@@ -2052,92 +2214,76 @@ const PageAllAgreements = ({ onNavigate }) => {
         reload();
     };
     return (
-        <div>
-            {/* ── Header: title left, search + primary action right ── */}
-            <div className="rgrid-2" style={{
-                display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-                gap: 16, flexWrap: "wrap", marginBottom: 18,
-            }}>
+        <div data-ag-all="">
+            <style>{AG_ALL_CSS}</style>
+            {/* ── Header: title and how many, search + primary action ── */}
+            <header className="al-head">
                 <div>
-                    <h1 style={{ fontSize: 28, fontWeight: 800, color: t.text, margin: 0, fontFamily: "'Sora','Inter',sans-serif" }}>All Agreements</h1>
-                    <p style={{ fontSize: 13, color: t.textMuted, margin: "4px 0 0" }}>View and manage all your agreements</p>
+                    <h1>All agreements</h1>
+                    <p>
+                        {loading && agmts.length === 0 ? "Loading…"
+                            : `${paging.total} ${archivedView ? "archived " : ""}agreement${paging.total === 1 ? "" : "s"}`
+                              + (!archivedView && needMine > 0 ? ` · ${needMine} need${needMine === 1 ? "s" : ""} your signature` : "")}
+                    </p>
                 </div>
-
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ position: "relative", minWidth: 220 }}>
-                        <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 13, color: t.textMuted }}>🔍</span>
-                        <Input placeholder="Search" value={search} onChange={e => setSearch(e.target.value)}
-                            style={{ paddingLeft: 36, fontSize: 13.5, padding: "11px 14px 11px 36px" }} />
-                    </div>
+                    <label className="al-search">
+                        <AdIcon d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3" s={16} />
+                        <input aria-label="Search agreements" placeholder="Search by title" value={search} onChange={e => setSearch(e.target.value)} />
+                    </label>
                     {/* NOT "Upload New". There is no upload-an-agreement endpoint,
                         so that button would offer a feature that does not exist.
                         This opens the builder, and only when the builder is
                         actually enabled -- otherwise the server refuses the send
                         with a 403 and the button would be a second lie. */}
                     {DIY_BUILDER_ENABLED && (
-                        <Btn primary onClick={() => onNavigate("templates")}
-                            style={{ padding: "11px 20px", fontSize: 13.5, whiteSpace: "nowrap" }}>
-                            New Agreement
-                        </Btn>
+                        <button type="button" className="al-new" onClick={() => onNavigate("templates")}>
+                            <AdIcon d={AD_PATH.plus} s={16} w={2.6} /> New agreement
+                        </button>
                     )}
                 </div>
-            </div>
+            </header>
 
-            {/* Filter pills, right-aligned under the search */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {filters.map(f => (
-                    <button key={f} onClick={() => setFilter(f)} style={{
-                        padding: "8px 20px", borderRadius: 50, fontSize: 13, fontWeight: filter === f ? 700 : 500,
-                        cursor: "pointer", fontFamily: "'Inter',sans-serif", transition: "all 0.15s",
-                        border: `1.5px solid ${filter === f ? t.primary : t.border}`,
-                        background: filter === f ? t.primaryGlow : "transparent",
-                        color: filter === f ? t.primary : t.textMuted,
-                    }}>{f}</button>
-                ))}
+            {/* Status filters in one group; Archived apart, because it is a
+                view across all four statuses, not a fifth one. */}
+            <div className="al-bar">
+                <div className="al-seg" role="group" aria-label="Filter by status">
+                    {filters.filter(f => f !== "Archived").map(f => (
+                        <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{f}</button>
+                    ))}
+                </div>
+                <button type="button" className="al-arch" aria-pressed={archivedView}
+                    onClick={() => setFilter(archivedView ? "All" : "Archived")}>
+                    <AdIcon d="M3 5h18v4H3zM5 9v10h14V9M10 13h4" s={15} />Archived
+                </button>
             </div>
 
             {/* ── Table ── */}
-            {/* Five columns cannot stack; scroll sideways on narrow screens. */}
-            <Card style={{ padding: 0, overflow: "visible" }}>
-                <div style={{
-                    display: "grid", gridTemplateColumns: GRID, minWidth: 720,
-                    padding: "12px 22px", borderBottom: `1px solid ${t.border}`, background: t.surface,
-                }}>
+            {/* Desktop layout (the client UI targets desktop). No scroll box: it
+                would clip the row menu that opens below each row. */}
+            <div className="al-table">
+                <div className="al-grid al-th">
                     {["DOCUMENT", "PARTIES", "STATUS", "PROGRESS", "ACTIONS"].map(h => (
-                        <div key={h} style={{
-                            fontSize: 10, fontWeight: 700, color: t.textMuted,
-                            letterSpacing: "0.8px", textTransform: "uppercase",
-                        }}>{h}</div>
+                        <div key={h} style={h === "ACTIONS" ? { textAlign: "right" } : undefined}>{h}</div>
                     ))}
                 </div>
 
-                {filtered.map((a, i) => {
-                    const tone = a.needsMySig ? t.info
-                        : a.status === "Signed" ? t.success
-                            : a.status === "Rejected" ? t.danger : t.warn;
+                {filtered.map(a => {
+                    const look = rowLook(a);
                     const others = (a.parties || []).filter(p => p.user_id !== a.createdBy);
                     const sender = (a.parties || []).find(p => p.user_id === a.createdBy);
+                    const senderName = sender?.full_name || "You";
+                    const pct = a.totalParties ? Math.round((a.signedCount / a.totalParties) * 100) : 0;
+                    const ini = n => (n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
                     return (
-                        <div key={a.id} onClick={() => openAgreement(a)} style={{
-                            display: "grid", gridTemplateColumns: GRID, minWidth: 720,
-                            alignItems: "center", padding: "14px 22px",
-                            borderBottom: i < filtered.length - 1 ? `1px solid ${t.border}` : "none",
-                            transition: "background 0.15s", cursor: "pointer",
-                        }}
-                            onMouseEnter={e => e.currentTarget.style.background = t.cardHi}
-                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                        >
+                        <div key={a.id} className="al-grid al-tr" style={{ "--c": look.c }} onClick={() => openAgreement(a)}>
                             {/* DOCUMENT — the icon is tinted by state, so the
-                                column reads at a glance without the badge. */}
+                                column reads at a glance without the chip. */}
                             <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                                <div style={{
-                                    width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-                                    background: `${tone}1F`, border: `1px solid ${tone}45`,
-                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15,
-                                }}>{a.isEngagementLetter ? "⚖️" : "📄"}</div>
+                                <span className="al-ic"><AdIcon d={AD_PATH[look.icon]} s={18} w={look.icon === "check" ? 2.4 : 2} /></span>
                                 <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontSize: 13.5, fontWeight: 700, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-                                    <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 2 }}>{a.date}</div>
+                                    <div className="al-title">{a.name}</div>
+                                    <div className="al-sub">{a.isEngagementLetter ? "Engagement letter" : "Agreement"}{a.date ? ` · ${a.date}` : ""}</div>
                                 </div>
                             </div>
 
@@ -2145,63 +2291,50 @@ const PageAllAgreements = ({ onNavigate }) => {
                                 COUNTED rather than assumed to be one. An
                                 agreement may have three parties, and a fixed
                                 Sender/Recipient pair would silently drop the
-                                third. */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                                <div>
-                                    <div style={{ fontSize: 10, color: t.textFaint, marginBottom: 3 }}>Sender</div>
-                                    <PartyAvatar name={sender?.full_name || "You"} tone={t.textMuted}
-                                        title={sender?.full_name || "You"} />
-                                </div>
-                                <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontSize: 10, color: t.textFaint, marginBottom: 3 }}>
-                                        {others.length > 1 ? `Recipients (${others.length})` : "Recipient"}
-                                    </div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                                        {others.slice(0, 2).map((p, n) => (
-                                            <PartyAvatar key={n}
-                                                name={p.full_name || p.email || "Invited"}
-                                                tone={p.signed ? t.success : t.warn}
-                                                title={`${p.full_name || p.email || "Invited signer"} — ${p.signed ? "signed" : "pending"}`} />
-                                        ))}
-                                        {others.length > 2 && (
-                                            <span style={{ fontSize: 11, color: t.textMuted }}>+{others.length - 2}</span>
-                                        )}
-                                        <span style={{
-                                            fontSize: 12, color: t.textMuted, overflow: "hidden",
-                                            textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                        }}>
-                                            {others[0]?.full_name || others[0]?.email || "—"}
+                                third. A recipient's ring is green once signed. */}
+                            <div style={{ minWidth: 0 }}>
+                                <div className="al-avs">
+                                    <span className="al-av" style={{ "--c": "#9aa8a6" }} title={`Sender — ${senderName}`}>{ini(senderName)}</span>
+                                    {others.slice(0, 3).map((p, n) => (
+                                        <span key={n} className="al-av" style={{ "--c": p.signed ? AD_MINT : AD_GOLD }}
+                                            title={`${p.full_name || p.email || "Invited signer"} — ${p.signed ? "signed" : "not signed yet"}`}>
+                                            {ini(p.full_name || p.email || "Invited")}
                                         </span>
-                                    </div>
+                                    ))}
+                                    {others.length > 3 && <span style={{ marginLeft: 6, fontSize: 11.5, color: "var(--muted)" }}>+{others.length - 3}</span>}
+                                </div>
+                                <div className="al-sub" style={{ marginTop: 5 }}>
+                                    Sender {senderName} · {others.length > 1 ? `Recipients (${others.length})` : `Recipient ${others[0]?.full_name || others[0]?.email || "—"}`}
                                 </div>
                             </div>
 
-                            {/* STATUS. The Sign call-to-action sits here rather
-                                than in ACTIONS: it belongs beside the reason it is
-                                being offered, and it leaves the menu a single,
-                                predictable target. */}
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-                                <StatusBadge status={a.needsMySig ? "Needs Attention" : a.status} />
-                                {a.needsMySig && (
-                                    <Btn primary style={{ fontSize: 11, padding: "5px 12px" }}
-                                        onClick={e => { e.stopPropagation(); openAgreement(a); }}>
-                                        ✍️ Sign
-                                    </Btn>
-                                )}
-                            </div>
+                            {/* STATUS */}
+                            <span className="al-chip"><i />{a.needsMySig ? "Needs you" : a.status}</span>
 
                             {/* PROGRESS */}
-                            <ProgressRing done={a.signedCount} total={a.totalParties} tone={tone} />
+                            <div>
+                                <div className="al-pbar"><i style={{ width: `${pct}%` }} /></div>
+                                <div className="al-sub" style={{ marginTop: 5 }}>{a.signedCount}/{a.totalParties} signed</div>
+                            </div>
 
-                            {/* ACTIONS */}
-                            <RowMenu
-                                agreement={a}
-                                archivedView={archivedView}
-                                onOpen={() => openAgreement(a)}
-                                onDownload={() => doDownloadRow(a)}
-                                onArchive={() => doArchive(a)}
-                                onUnarchive={() => doUnarchive(a)}
-                            />
+                            {/* ACTIONS — the one step that moves it on, then the menu. */}
+                            <div className="al-acts" onClick={e => e.stopPropagation()}>
+                                {a.needsMySig ? (
+                                    <button type="button" className="al-btn solid" style={{ "--a": AD_MINT }} onClick={() => openAgreement(a)}>Sign</button>
+                                ) : a.rawStatus === "executed" ? (
+                                    <button type="button" className="al-btn" style={{ "--a": AD_LAV }} onClick={() => doDownloadRow(a)}>PDF ↓</button>
+                                ) : (
+                                    <button type="button" className="al-btn" style={{ "--a": AD_CYAN }} onClick={() => openAgreement(a)}>Open</button>
+                                )}
+                                <RowMenu
+                                    agreement={a}
+                                    archivedView={archivedView}
+                                    onOpen={() => openAgreement(a)}
+                                    onDownload={() => doDownloadRow(a)}
+                                    onArchive={() => doArchive(a)}
+                                    onUnarchive={() => doUnarchive(a)}
+                                />
+                            </div>
                         </div>
                     );
                 })}
@@ -2211,28 +2344,30 @@ const PageAllAgreements = ({ onNavigate }) => {
                     stay honest about loaded-vs-total rather than printing a
                     tidy range the data does not support. */}
                 {!loading && agmts.length > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 22px", borderTop: `1px solid ${t.border}`, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 12.5, color: t.textMuted }}>
+                    <div className="al-foot">
+                        <span>
                             {filtered.length === agmts.length
                                 ? `Showing ${agmts.length} of ${paging.total}`
                                 : `Showing ${filtered.length} of ${agmts.length} loaded (${paging.total} total)`}
                         </span>
                         {paging.hasMore && (
-                            <button type="button" onClick={paging.loadMore} disabled={loading}
-                                style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 9, padding: "7px 14px", cursor: "pointer", fontSize: 12.5, color: t.text, fontWeight: 600, fontFamily: "inherit" }}>
+                            <button type="button" className="al-btn" style={{ "--a": AD_CYAN }} onClick={paging.loadMore} disabled={loading}>
                                 Load more
                             </button>
                         )}
                     </div>
                 )}
-                {loading ? (
-                    <div style={{ padding: "40px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading agreements…</div>
-                ) : filtered.length === 0 && (
-                    <div style={{ padding: "40px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
-                        No agreements found.
+                {loading && agmts.length === 0 ? (
+                    <div className="al-empty">Loading agreements…</div>
+                ) : filtered.length === 0 && !loading && (
+                    <div className="al-empty">
+                        <b>{search ? "Nothing matches your search" : archivedView ? "Nothing archived" : filter === "All" ? "No agreements yet" : `No ${filter.toLowerCase()} agreements`}</b>
+                        {search ? "Try another title."
+                            : archivedView ? "Agreements you remove from your list appear here."
+                                : filter === "All" ? "Agreements shared with you appear here for you to read and sign." : "Try another filter."}
                     </div>
                 )}
-            </Card>
+            </div>
 
             {/* View / Sign modal */}
             {viewing && (
@@ -2379,9 +2514,8 @@ const PageAllAgreements = ({ onNavigate }) => {
                                     </div>
                                 </div>
                             ) : (
-                                <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.85, color: t.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
-                                    {doc?.body ? doc.body : "No content."}
-                                </div>
+                                <AgreementBody body={doc?.body} format={doc?.format}
+                                    style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.85, color: t.text, fontFamily: "Georgia,serif" }} />
                             )}
 
                             {/* Only once EXECUTED. Before both parties have
@@ -2511,142 +2645,47 @@ const AgmtIc = ({ name, s = 18, c = "currentColor" }) => {
    from a lawyer the client hired live in this same list, and an agreement
    somebody is already a party to must never become unreachable because a
    different feature was parked. */
-const DIY_BUILDER_ENABLED =
-    (typeof process !== "undefined" &&
-        process.env?.NEXT_PUBLIC_AGREEMENTS_DIY_ENABLED === "true") || false;
+const DIY_BUILDER_ENABLED = AGREEMENTS_DIY_ENABLED;   // read in lib/agreementsNav.js
 
-// ── SIDEBAR NAV ──────────────────────────────
-const Sidebar = ({ page, onNavigate, collapsed }) => {
-    const t = useTheme();
-    const links = [
-        { id: "dashboard", ico: "dashboard", label: "Dashboard" },
-        ...(DIY_BUILDER_ENABLED ? [
-            { id: "templates", ico: "templates", label: "Templates" },
-            { id: "create", ico: "create", label: "Create" },
-        ] : []),
-        { id: "all", ico: "all", label: "All Agreements" },
-    ];
-    return (
-        <div style={{
-            width: collapsed ? 64 : 230, flexShrink: 0,
-            background: t.surface,
-            borderRight: `1px solid ${t.border}`, display: "flex", flexDirection: "column",
-            transition: "width 0.25s cubic-bezier(0.4,0,0.2,1)", overflow: "hidden",
-            height: "100%",
-        }}>
-            {/* Brand */}
-            <div style={{
-                padding: collapsed ? "18px 0" : "18px 20px",
-                borderBottom: `1px solid ${t.border}`,
-                display: "flex", alignItems: "center",
-                justifyContent: collapsed ? "center" : "flex-start",
-                gap: 10, flexShrink: 0,
-            }}>
-                <div style={{
-                    width: 32, height: 32, borderRadius: 10,
-                    background: `linear-gradient(135deg, ${t.primary}, ${t.primaryDim})`,
-                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                    boxShadow: `0 4px 12px ${t.primaryGlow}`,
-                }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={t.mode === "dark" ? "#1A2E35" : "#fff"} strokeWidth="2.5">
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                    </svg>
-                </div>
-                {!collapsed && (
-                    <span style={{
-                        fontSize: 15, fontWeight: 800, color: t.text,
-                        fontFamily: "'Sora','Inter',sans-serif", letterSpacing: "-0.3px",
-                        whiteSpace: "nowrap",
-                    }}>Agreement<span style={{ color: t.primary }}>Hub</span></span>
-                )}
-            </div>
-
-            {/* Nav links */}
-            <div style={{ padding: "10px 10px", flex: 1, overflow: "auto" }}>
-                {links.map(l => {
-                    const active = page === l.id || (page === "create" && l.id === "create");
-                    return (
-                        <div key={l.id} onClick={() => onNavigate(l.id)} style={{
-                            display: "flex", alignItems: "center",
-                            gap: collapsed ? 0 : 12,
-                            justifyContent: collapsed ? "center" : "flex-start",
-                            padding: collapsed ? "13px 0" : "12px 14px",
-                            borderRadius: 12, marginBottom: 4, cursor: "pointer",
-                            transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
-                            background: active ? t.primaryGlow : "transparent",
-                            color: active ? t.primary : t.textMuted,
-                            position: "relative",
-                        }}
-                            onMouseEnter={e => { if (!active) { e.currentTarget.style.background = t.inputBg; e.currentTarget.style.color = t.text; } }}
-                            onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = t.textMuted; } }}
-                        >
-                            <AgmtIc name={l.ico} s={18} c={active ? t.primary : "currentColor"} />
-                            {!collapsed && (
-                                <span style={{
-                                    fontSize: 13, fontWeight: active ? 700 : 500,
-                                    whiteSpace: "nowrap", flex: 1,
-                                }}>{l.label}</span>
-                            )}
-                            {active && !collapsed && (
-                                <div style={{ width: 7, height: 7, borderRadius: "50%", background: t.primary, boxShadow: `0 0 8px ${t.primaryGlow}`, flexShrink: 0 }} />
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-};
+/* Page navigation lives in the client sidebar, under "Agreements"
+   (2026-10-11), the way Documents' sections do: lib/agreementsNav.js. The
+   module's own inner sidebar and its collapse bar were removed with it. */
 
 // ── ModAgreements ─────────────────────────────
 function ModAgreements() {
     const t = useTheme();
-    const [page, setPage] = useState("dashboard");
+    const [page, setPage] = useState(() => {
+        const p = takePendingAgreementsView();
+        return p && (DIY_BUILDER_ENABLED || (p !== "create" && p !== "templates")) ? p : "dashboard";
+    });
     const [selectedTemplate, setSelectedTemplate] = useState(null);
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     /* Parked pages are unreachable by ROUTE, not merely unlinked. Removing the
        sidebar entries alone would leave `create` reachable from the dashboard's
        own call-to-action and from any stale state, landing the user in a wizard
        whose last click the server refuses. */
-    const navigate = (p) =>
+    const [allFilter, setAllFilter] = useState("All");   // the list's opening filter
+    const navigate = (p, opts) => {
+        setAllFilter(opts?.filter || "All");
         setPage(!DIY_BUILDER_ENABLED && (p === "create" || p === "templates")
             ? "all" : p);
+    };
+
+    // The sidebar asks for a page; the module says which page it is on.
+    useEffect(() => {
+        const on = e => { if (e?.detail?.view) { takePendingAgreementsView(); navigate(e.detail.view); } };
+        window.addEventListener(AGREEMENTS_VIEW_EVENT, on);
+        return () => window.removeEventListener(AGREEMENTS_VIEW_EVENT, on);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    useEffect(() => { announceAgreementsView(page); }, [page]);
 
     return (
         <div style={{
-            display: "flex", height: "100%", background: t.bg, fontFamily: "'Inter',sans-serif",
+            display: "flex", height: "100%", background: t.bg, fontFamily: AG_FONT,
             color: t.text, overflow: "hidden",
         }}>
-            {/* Sidebar */}
-            <Sidebar page={page} onNavigate={navigate} collapsed={sidebarCollapsed} />
-
-            {/* Main area */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                {/* Top bar */}
-                <div style={{
-                    height: 52, flexShrink: 0, background: t.surface, borderBottom: `1px solid ${t.border}`,
-                    display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px",
-                }}>
-                    <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={{
-                        width: 32, height: 32, borderRadius: 8, border: `1px solid ${t.border}`,
-                        background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 14,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>☰</button>
-                    {/* Three pieces of decorative chrome removed:
-
-                        - a search button with no handler;
-                        - a notification bell with no handler, rendering a
-                          PERMANENT unread dot -- a badge that was always on and
-                          therefore meant nothing. The real notification drawer
-                          lives in Dashboard.jsx and has real unread state;
-                        - an avatar hardcoded to "JD", shown to every user
-                          whoever they were.
-
-                        None of them did anything, and together they made a
-                        signing surface look like a mock-up. */}
-                </div>
-
                 {/* Page content */}
                 <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
                     {page === "dashboard" && <PageDashboard onNavigate={navigate} />}
@@ -2656,7 +2695,7 @@ function ModAgreements() {
                     {DIY_BUILDER_ENABLED && page === "create" && (
                         <PageCreate template={selectedTemplate} onNavigate={navigate} onDone={() => navigate("all")} />
                     )}
-                    {page === "all" && <PageAllAgreements onNavigate={navigate} />}
+                    {page === "all" && <PageAllAgreements key={allFilter} onNavigate={navigate} initialFilter={allFilter} />}
                 </div>
             </div>
         </div>
